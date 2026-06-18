@@ -1,0 +1,17 @@
+[package]
+name = "cisco-client"
+version = "0.1.0"
+description = "Cisco SSH client"
+authors = ["Cisco Client"]
+license = ""
+repository = ""
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "1.5", features = [] }
+
+[dependencies]
+tauri = { version = "1.6", features = [ "shell-sidecar", "shell-open"] }
+
+[features]
+custom-protocol = ["tauri/custom-protocol"]

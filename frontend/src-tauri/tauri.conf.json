@@ -1,0 +1,50 @@
+{
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build",
+    "devPath": "http://127.0.0.1:1420",
+    "distDir": "../dist",
+    "withGlobalTauri": true
+  },
+  "package": {
+    "productName": "Cisco Client",
+    "version": "0.1.0"
+  },
+  "tauri": {
+    "allowlist": {
+      "all": false,
+      "shell": {
+        "all": false,
+        "open": true,
+        "sidecar": true,
+        "scope": [
+          {
+            "name": "../sidecars/cisco-backend",
+            "sidecar": true
+          }
+        ]
+      }
+    },
+    "bundle": {
+      "active": true,
+      "category": "DeveloperTool",
+      "externalBin": [
+        "../sidecars/cisco-backend"
+      ],
+      "identifier": "local.cisco-client.app",
+      "targets": "all"
+    },
+    "security": {
+      "csp": null
+    },
+    "windows": [
+      {
+        "title": "Cisco Client",
+        "width": 1180,
+        "height": 760,
+        "minWidth": 940,
+        "minHeight": 640
+      }
+    ]
+  }
+}

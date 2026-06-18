@@ -1,0 +1,23 @@
+app-id: local.cisco-client.app
+runtime: org.gnome.Platform
+runtime-version: "46"
+sdk: org.gnome.Sdk
+command: cisco-client
+finish-args:
+  - --share=network
+  - --socket=x11
+  - --socket=wayland
+  - --device=dri
+modules:
+  - name: cisco-client
+    buildsystem: simple
+    build-commands:
+      - install -Dm755 cisco-client /app/bin/cisco-client
+      - mkdir -p /app/lib/cisco-client
+      - cp -r bundle/* /app/lib/cisco-client/
+    sources:
+      - type: file
+        path: ../../frontend/src-tauri/target/release/cisco-client
+      - type: dir
+        path: ../../frontend/src-tauri/target/release/bundle
+        dest: bundle
