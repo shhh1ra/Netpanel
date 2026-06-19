@@ -3,9 +3,14 @@ import re
 from dataclasses import dataclass
 
 import asyncssh
+from asyncssh.encryption import get_default_encryption_algs
+from asyncssh.kex import get_default_kex_algs
 
 
 PROMPT_RE = re.compile(r"[\r\n][^\r\n]*(?:>|#)\s*$")
+
+ENCRYPTION_ALGS = [alg.decode() for alg in get_default_encryption_algs()] + ["aes256-cbc", "aes192-cbc", "aes128-cbc", "3des-cbc"]
+KEX_ALGS = [alg.decode() for alg in get_default_kex_algs()] + ["diffie-hellman-group1-sha1"]
 
 
 @dataclass(slots=True)
@@ -29,6 +34,8 @@ class SSHClient:
             username=username,
             password=password,
             known_hosts=None,
+            encryption_algs=ENCRYPTION_ALGS,
+            kex_algs=KEX_ALGS,
             login_timeout=12,
             connect_timeout=12,
         )

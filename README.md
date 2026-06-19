@@ -9,10 +9,10 @@ cd backend
 python -m venv .venv
 .\.venv\Scripts\activate
 pip install -r requirements.txt
-uvicorn main:app --host 127.0.0.1 --port 8001
+uvicorn main:app --host 127.0.0.1 --port 17761
 ```
 
-API будет доступен на `http://127.0.0.1:8001`.
+API будет доступен на `http://127.0.0.1:17761`.
 
 ## Frontend
 

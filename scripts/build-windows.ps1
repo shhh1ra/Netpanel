@@ -29,6 +29,7 @@ try {
         "entrypoint.py",
         "--name", "cisco-backend",
         "--onefile",
+        "--noconsole",
         "--clean",
         "--noconfirm",
         "--distpath", "dist",

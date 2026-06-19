@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { writeText } from "@tauri-apps/api/clipboard";
 import { Command, Child } from "@tauri-apps/api/shell";
 import { computed, onMounted, reactive, ref } from "vue";
 
@@ -15,20 +16,33 @@ type Action =
 type Protocol = "bgp" | "ospf";
 type DiscoveryProtocol = "cdp" | "lldp" | "both";
 
+interface HostProfile {
+  id: string;
+  name: string;
+  host: string;
+  port: number;
+  username: string;
+}
+
 interface CommandOption {
   value: Action;
   label: string;
   description: string;
 }
 
-const apiBase = ref("http://127.0.0.1:8001");
+const apiBase = ref("http://127.0.0.1:17761");
 const sessionId = ref("");
 const connectedTo = ref("");
 const isBusy = ref(false);
 const error = ref("");
 const output = ref("");
 const issuedCommands = ref<string[]>([]);
+const copied = ref(false);
 const backendChild = ref<Child | null>(null);
+const hostProfiles = ref<HostProfile[]>([]);
+const selectedHostId = ref("");
+const hostProfileName = ref("");
+const HOSTS_STORAGE_KEY = "cisco-client-hosts";
 
 const connection = reactive({
   host: "",
@@ -66,17 +80,74 @@ const needsRoute = computed(() => command.action === "route_lookup");
 const needsDiscovery = computed(() => command.action === "discovery_neighbors");
 
 onMounted(() => {
+  loadHostProfiles();
   void startBundledBackend();
 });
 
+function loadHostProfiles() {
+  try {
+    hostProfiles.value = JSON.parse(localStorage.getItem(HOSTS_STORAGE_KEY) || "[]");
+  } catch {
+    hostProfiles.value = [];
+  }
+}
+
+function persistHostProfiles() {
+  localStorage.setItem(HOSTS_STORAGE_KEY, JSON.stringify(hostProfiles.value));
+}
+
+function selectHostProfile() {
+  const profile = hostProfiles.value.find((item) => item.id === selectedHostId.value);
+  if (!profile) {
+    hostProfileName.value = "";
+    return;
+  }
+
+  hostProfileName.value = profile.name;
+  connection.host = profile.host;
+  connection.port = profile.port;
+  connection.username = profile.username;
+  connection.password = "";
+}
+
+function saveHostProfile() {
+  if (!connection.host.trim()) return;
+
+  const existing = hostProfiles.value.find((item) => item.id === selectedHostId.value);
+  const profile: HostProfile = {
+    id: existing?.id || `${Date.now()}`,
+    name: hostProfileName.value.trim() || connection.host.trim(),
+    host: connection.host.trim(),
+    port: connection.port,
+    username: connection.username.trim(),
+  };
+
+  if (existing) {
+    Object.assign(existing, profile);
+  } else {
+    hostProfiles.value.push(profile);
+    selectedHostId.value = profile.id;
+  }
+
+  hostProfileName.value = profile.name;
+  persistHostProfiles();
+}
+
+function deleteHostProfile() {
+  if (!selectedHostId.value) return;
+  hostProfiles.value = hostProfiles.value.filter((item) => item.id !== selectedHostId.value);
+  selectedHostId.value = "";
+  hostProfileName.value = "";
+  persistHostProfiles();
+}
+
 async function startBundledBackend() {
-  if (!("__TAURI__" in window)) return;
 
   try {
     const backend = Command.sidecar("../sidecars/cisco-backend", [], {
       env: {
         CISCO_CLIENT_HOST: "127.0.0.1",
-        CISCO_CLIENT_PORT: "8001",
+        CISCO_CLIENT_PORT: "17761",
       },
     });
     backendChild.value = await backend.spawn();
@@ -154,6 +225,17 @@ async function runCommand() {
   }
 }
 
+async function copyOutput() {
+  if (!output.value) return;
+
+  await writeText(output.value);
+
+  copied.value = true;
+  window.setTimeout(() => {
+    copied.value = false;
+  }, 1400);
+}
+
 async function parseResponse(response: Response) {
   const text = await response.text();
   const data = text ? JSON.parse(text) : {};
@@ -183,6 +265,26 @@ function errorMessage(err: unknown) {
         <div class="panel-head">
           <h2>Подключение</h2>
           <span class="status" :class="{ online: isConnected }">{{ isConnected ? "online" : "offline" }}</span>
+        </div>
+
+        <div class="host-manager">
+          <label>
+            Профиль
+            <select v-model="selectedHostId" @change="selectHostProfile">
+              <option value="">Новый хост</option>
+              <option v-for="profile in hostProfiles" :key="profile.id" :value="profile.id">
+                {{ profile.name }} — {{ profile.host }}
+              </option>
+            </select>
+          </label>
+          <label>
+            Название
+            <input v-model="hostProfileName" placeholder="Например, SW1" autocomplete="off" />
+          </label>
+          <div class="host-actions">
+            <button type="button" :disabled="!connection.host" @click="saveHostProfile">Сохранить</button>
+            <button type="button" :disabled="!selectedHostId" @click="deleteHostProfile">Удалить</button>
+          </div>
         </div>
 
         <label>
@@ -287,7 +389,19 @@ function errorMessage(err: unknown) {
 
       <div v-if="error" class="notice error">{{ error }}</div>
 
-      <pre class="terminal" :class="{ empty: !output }">{{ output || "После подключения выбери действие слева. Результат появится здесь." }}</pre>
+      <div class="terminal-wrap">
+        <button
+          v-if="output"
+          class="copy-output"
+          type="button"
+          :title="copied ? 'Скопировано' : 'Копировать вывод'"
+          :aria-label="copied ? 'Скопировано' : 'Копировать вывод'"
+          @click="copyOutput"
+        >
+          {{ copied ? "✓" : "⧉" }}
+        </button>
+        <pre class="terminal" :class="{ empty: !output }">{{ output || "После подключения выбери действие слева. Результат появится здесь." }}</pre>
+      </div>
     </section>
   </main>
 </template>

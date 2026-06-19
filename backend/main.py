@@ -68,7 +68,7 @@ app = FastAPI(title="Cisco Client API", version="0.1.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:1420", "http://127.0.0.1:1420"],
+    allow_origins=["http://localhost:1420", "http://127.0.0.1:1420", "tauri://localhost", "https://tauri.localhost"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
