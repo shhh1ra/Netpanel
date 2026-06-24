@@ -2,7 +2,7 @@
 import { writeText } from "@tauri-apps/api/clipboard";
 import { Command, Child } from "@tauri-apps/api/shell";
 import { invoke } from "@tauri-apps/api/tauri";
-import { computed, nextTick, onMounted, reactive, ref } from "vue";
+import { computed, nextTick, onMounted, reactive, ref, watch } from "vue";
 
 type Action =
   | "running_config"
@@ -14,6 +14,7 @@ type Action =
   | "route_lookup"
   | "discovery_neighbors"
   | "interface_diagnostics"
+  | "ip_interface_brief"
   | "mac_table"
   | "ip_location";
 
@@ -58,7 +59,11 @@ const presentation = ref<Presentation | null>(null);
 const resultMode = ref<"human" | "raw">("human");
 const terminalOutput = ref("");
 const terminalInput = ref("");
+const terminalInputField = ref<HTMLInputElement | null>(null);
 const terminalPane = ref<HTMLElement | null>(null);
+const terminalHistory = ref<string[]>([]);
+const terminalHistoryIndex = ref(0);
+const terminalHistoryDraft = ref("");
 const issuedCommands = ref<string[]>([]);
 const copied = ref(false);
 const activeWorkspace = ref<"commands" | "terminal">("commands");
@@ -67,6 +72,43 @@ const hostProfiles = ref<HostProfile[]>([]);
 const selectedHostId = ref("");
 const hostProfileName = ref("");
 const HOSTS_STORAGE_KEY = "netpanel-hosts";
+const IOS_COMPLETIONS = [
+  "show running-config",
+  "show startup-config",
+  "show version",
+  "show inventory",
+  "show ip interface brief",
+  "show interfaces status",
+  "show interfaces summary",
+  "show interfaces",
+  "show ip arp",
+  "show mac address-table",
+  "show mac address-table dynamic",
+  "show vlan brief",
+  "show cdp neighbors",
+  "show cdp neighbors detail",
+  "show lldp neighbors",
+  "show lldp neighbors detail",
+  "show ip route",
+  "show ip route static",
+  "show ip bgp summary",
+  "show ip ospf neighbor",
+  "show ip dhcp snooping binding",
+  "show ip device tracking",
+  "configure terminal",
+  "interface",
+  "interface range",
+  "description",
+  "switchport mode access",
+  "switchport access vlan",
+  "switchport mode trunk",
+  "shutdown",
+  "no shutdown",
+  "exit",
+  "end",
+  "write memory",
+  "copy running-config startup-config",
+];
 
 const connection = reactive({
   host: "",
@@ -99,6 +141,7 @@ const commandOptions: CommandOption[] = [
   { value: "route_lookup", label: "Поиск адреса или диапазона", description: "Проверка существования маршрута" },
   { value: "discovery_neighbors", label: "Соседи CDP / LLDP", description: "Топология, имена, платформы и порты" },
   { value: "interface_diagnostics", label: "Статус интерфейсов", description: "Состояние, ошибки, загрузка и пропускная способность" },
+  { value: "ip_interface_brief", label: "IP-интерфейсы", description: "Краткая сводка адресов и состояния интерфейсов" },
   { value: "mac_table", label: "Таблица MAC-адресов", description: "CAM-таблица с поиском по MAC или VLAN" },
   { value: "ip_location", label: "Найти устройство по IP", description: "ARP, DHCP Snooping и IP Device Tracking" },
 ];
@@ -122,6 +165,12 @@ const canRunAction = computed(() => {
 onMounted(async () => {
   await loadHostProfiles();
   void startBundledBackend();
+});
+
+watch(activeWorkspace, async (workspace) => {
+  if (workspace === "terminal") {
+    await focusTerminalInput();
+  }
 });
 
 async function loadHostProfiles() {
@@ -240,6 +289,9 @@ async function connect() {
   presentation.value = null;
   terminalOutput.value = "";
   terminalInput.value = "";
+  terminalHistory.value = [];
+  terminalHistoryIndex.value = 0;
+  terminalHistoryDraft.value = "";
   issuedCommands.value = [];
   isBusy.value = true;
 
@@ -258,6 +310,9 @@ async function connect() {
     error.value = errorMessage(err);
   } finally {
     isBusy.value = false;
+    if (activeWorkspace.value === "terminal") {
+      await focusTerminalInput();
+    }
   }
 }
 
@@ -272,6 +327,9 @@ async function disconnect() {
     sessionId.value = "";
     connectedTo.value = "";
     terminalInput.value = "";
+    terminalHistory.value = [];
+    terminalHistoryIndex.value = 0;
+    terminalHistoryDraft.value = "";
     isBusy.value = false;
   }
 }
@@ -318,9 +376,17 @@ async function runCommand() {
 }
 
 async function runTerminalCommand() {
-  if (!sessionId.value || !terminalInput.value.trim()) return;
+  if (!sessionId.value || isBusy.value || !terminalInput.value.trim()) return;
 
   const rawCommand = terminalInput.value.trim();
+  if (terminalHistory.value[terminalHistory.value.length - 1] !== rawCommand) {
+    terminalHistory.value.push(rawCommand);
+    if (terminalHistory.value.length > 100) {
+      terminalHistory.value.shift();
+    }
+  }
+  terminalHistoryIndex.value = terminalHistory.value.length;
+  terminalHistoryDraft.value = "";
   terminalInput.value = "";
   error.value = "";
   isBusy.value = true;
@@ -343,6 +409,145 @@ async function runTerminalCommand() {
   } finally {
     await scrollTerminalToEnd();
     isBusy.value = false;
+    await focusTerminalInput();
+  }
+}
+
+async function focusTerminalInput() {
+  await nextTick();
+  terminalInputField.value?.focus();
+}
+
+function handleTerminalKeydown(event: KeyboardEvent) {
+  if (event.key === "ArrowUp") {
+    event.preventDefault();
+    navigateTerminalHistory(-1);
+    return;
+  }
+
+  if (event.key === "ArrowDown") {
+    event.preventDefault();
+    navigateTerminalHistory(1);
+    return;
+  }
+
+  if (event.key === "Tab") {
+    event.preventDefault();
+    completeTerminalInput(event.shiftKey);
+    return;
+  }
+
+  if (event.key === "Escape" || (event.ctrlKey && event.key.toLowerCase() === "u")) {
+    event.preventDefault();
+    terminalInput.value = "";
+    terminalHistoryIndex.value = terminalHistory.value.length;
+    terminalHistoryDraft.value = "";
+    return;
+  }
+
+  if (event.ctrlKey && event.key.toLowerCase() === "l") {
+    event.preventDefault();
+    terminalOutput.value = connectedTo.value ? `Подключено к ${connectedTo.value}` : "";
+    return;
+  }
+
+  if (event.ctrlKey && event.key.toLowerCase() === "c") {
+    event.preventDefault();
+    if (isBusy.value) {
+      void interruptTerminalCommand();
+      return;
+    }
+    if (terminalInput.value) {
+      terminalOutput.value += `${terminalOutput.value ? "\n\n" : ""}$ ${terminalInput.value}\n^C`;
+      terminalInput.value = "";
+      terminalHistoryIndex.value = terminalHistory.value.length;
+      terminalHistoryDraft.value = "";
+      void scrollTerminalToEnd();
+    }
+  }
+}
+
+async function interruptTerminalCommand() {
+  if (!sessionId.value) return;
+
+  try {
+    const response = await fetch(`${apiBase.value}/sessions/${sessionId.value}/terminal/interrupt`, {
+      method: "POST",
+    });
+    await parseResponse(response);
+  } catch (err) {
+    error.value = errorMessage(err);
+  }
+}
+
+function navigateTerminalHistory(direction: -1 | 1) {
+  if (!terminalHistory.value.length) return;
+
+  if (direction === -1) {
+    if (terminalHistoryIndex.value === terminalHistory.value.length) {
+      terminalHistoryDraft.value = terminalInput.value;
+    }
+    terminalHistoryIndex.value = Math.max(0, terminalHistoryIndex.value - 1);
+    terminalInput.value = terminalHistory.value[terminalHistoryIndex.value] || "";
+  } else {
+    terminalHistoryIndex.value = Math.min(terminalHistory.value.length, terminalHistoryIndex.value + 1);
+    terminalInput.value =
+      terminalHistoryIndex.value === terminalHistory.value.length
+        ? terminalHistoryDraft.value
+        : terminalHistory.value[terminalHistoryIndex.value] || "";
+  }
+
+  void moveTerminalCaretToEnd();
+}
+
+function completeTerminalInput(reverse: boolean) {
+  const query = terminalInput.value.trimStart().toLowerCase();
+  if (!query) return;
+
+  const candidates = [...new Set([...terminalHistory.value.slice().reverse(), ...IOS_COMPLETIONS])]
+    .filter((candidate) => candidate.toLowerCase().startsWith(query))
+    .sort((left, right) => left.length - right.length);
+  if (!candidates.length) return;
+
+  if (candidates.length === 1) {
+    terminalInput.value = candidates[0];
+    void moveTerminalCaretToEnd();
+    return;
+  }
+
+  if (reverse) {
+    terminalInput.value = candidates[candidates.length - 1] || terminalInput.value;
+    void moveTerminalCaretToEnd();
+    return;
+  }
+
+  const commonPrefix = findCommonPrefix(candidates);
+  if (commonPrefix.length > query.length) {
+    terminalInput.value = commonPrefix;
+    void moveTerminalCaretToEnd();
+    return;
+  }
+
+  terminalOutput.value += `${terminalOutput.value ? "\n\n" : ""}${candidates.slice(0, 12).join("    ")}`;
+  void scrollTerminalToEnd();
+}
+
+function findCommonPrefix(values: string[]) {
+  return values.reduce((prefix, value) => {
+    let index = 0;
+    const limit = Math.min(prefix.length, value.length);
+    while (index < limit && prefix[index].toLowerCase() === value[index].toLowerCase()) {
+      index += 1;
+    }
+    return prefix.slice(0, index);
+  });
+}
+
+async function moveTerminalCaretToEnd() {
+  await focusTerminalInput();
+  const input = terminalInputField.value;
+  if (input) {
+    input.setSelectionRange(input.value.length, input.value.length);
   }
 }
 
@@ -765,10 +970,12 @@ function metricValue(metric: { label: string; value: string }) {
         <form class="terminal-input" @submit.prevent="runTerminalCommand">
           <span>$</span>
           <input
+            ref="terminalInputField"
             v-model="terminalInput"
-            :disabled="isBusy || !isConnected"
+            :disabled="!isConnected"
             autocomplete="off"
             placeholder="show interfaces status"
+            @keydown="handleTerminalKeydown"
           />
           <button type="submit" :disabled="isBusy || !isConnected || !terminalInput.trim()">Ввод</button>
         </form>

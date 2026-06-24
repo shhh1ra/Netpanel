@@ -23,6 +23,7 @@ class CommandAction(str, Enum):
     route_lookup = "route_lookup"
     discovery_neighbors = "discovery_neighbors"
     interface_diagnostics = "interface_diagnostics"
+    ip_interface_brief = "ip_interface_brief"
     mac_table = "mac_table"
     ip_location = "ip_location"
 
@@ -88,7 +89,7 @@ class TerminalResponse(BaseModel):
 
 
 manager = SSHManager()
-app = FastAPI(title="Netpanel API", version="0.2.0")
+app = FastAPI(title="Netpanel API", version="1.2.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -169,6 +170,19 @@ async def run_terminal_command(session_id: str, payload: TerminalRequest):
     return TerminalResponse(command=command, output=result)
 
 
+@app.post("/sessions/{session_id}/terminal/interrupt")
+async def interrupt_terminal(session_id: str):
+    session = manager.get_session(session_id)
+    if not session or not session.is_connected:
+        raise HTTPException(status_code=404, detail="SSH session is not connected")
+
+    try:
+        session.interrupt()
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Terminal interrupt failed: {exc}") from exc
+    return {"status": "interrupted"}
+
+
 def build_commands(payload: CommandRequest) -> list[str]:
     if payload.action == CommandAction.running_config:
         return ["show running-config"]
@@ -218,6 +232,9 @@ def build_commands(payload: CommandRequest) -> list[str]:
         if not payload.interface:
             raise HTTPException(status_code=422, detail="Interface is required for detailed diagnostics")
         return [f"show interfaces {sanitize_interface(payload.interface)}"]
+
+    if payload.action == CommandAction.ip_interface_brief:
+        return ["show ip interface brief"]
 
     if payload.action == CommandAction.mac_table:
         commands = []

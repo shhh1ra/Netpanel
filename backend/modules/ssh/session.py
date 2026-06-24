@@ -18,12 +18,17 @@ class SSHSession:
     async def exec(self, command: str):
         if not self.is_connected:
             raise RuntimeError("SSH session is not connected")
-        return await self.client.run_command(command)
+        return await self.client.run_operational_command(command)
 
     async def terminal(self, command: str):
         if not self.is_connected:
             raise RuntimeError("SSH session is not connected")
         return await self.client.run_terminal_command(command)
+
+    def interrupt(self):
+        if not self.is_connected:
+            raise RuntimeError("SSH session is not connected")
+        self.client.interrupt()
 
     async def disconnect(self):
         await self.client.close()

@@ -25,6 +25,7 @@ class SSHClient:
         self.conn: asyncssh.SSHClientConnection | None = None
         self.process: asyncssh.SSHClientProcess | None = None
         self.info: SSHConnectionInfo | None = None
+        self.prompt = ""
         self._lock = asyncio.Lock()
 
     async def connect_password(self, host: str, port: int, username: str, password: str):
@@ -55,11 +56,26 @@ class SSHClient:
             output = await self._read_until_prompt(timeout=timeout)
             return self._clean_output(command, output)
 
+    async def run_operational_command(self, command: str, timeout: float = 30) -> str:
+        actual_command = command
+        if self.is_config_mode and command.lstrip().lower().startswith("show "):
+            actual_command = f"do {command}"
+        return await self.run_command(actual_command, timeout=timeout)
+
     async def run_terminal_command(self, command: str, timeout: float = 60) -> str:
         command = command.strip()
         if not command:
             return ""
         return await self.run_command(command, timeout=timeout)
+
+    @property
+    def is_config_mode(self) -> bool:
+        return "(config" in self.prompt.lower()
+
+    def interrupt(self):
+        if not self.conn or not self.process:
+            raise RuntimeError("SSHClient not connected")
+        self.process.stdin.write("\x03")
 
     async def _read_until_prompt(self, timeout: float = 20) -> str:
         if not self.process:
@@ -74,7 +90,18 @@ class SSHClient:
             chunks.append(chunk)
             data = "".join(chunks)
             if PROMPT_RE.search("\n" + data):
+                self._update_prompt(data)
                 return data
+
+        data = "".join(chunks)
+        self._update_prompt(data)
+        return data
+
+    def _update_prompt(self, output: str):
+        normalized = output.replace("\r\n", "\n").replace("\r", "\n")
+        lines = [line.strip() for line in normalized.splitlines() if line.strip()]
+        if lines and re.search(r"(?:>|#)\s*$", lines[-1]):
+            self.prompt = lines[-1]
 
     @staticmethod
     def _clean_output(command: str, output: str) -> str:
@@ -97,3 +124,4 @@ class SSHClient:
             await self.conn.wait_closed()
             self.conn = None
             self.info = None
+            self.prompt = ""

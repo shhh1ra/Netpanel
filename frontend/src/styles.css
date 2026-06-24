@@ -219,9 +219,9 @@ h2 {
 }
 
 .topbar {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
-  justify-content: space-between;
   gap: 14px;
   min-height: 54px;
 }
@@ -243,12 +243,15 @@ h2 {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
+  justify-self: end;
+  min-width: 0;
   gap: 6px;
 }
 
 .workspace-tabs {
   display: inline-grid;
   grid-auto-flow: column;
+  justify-self: center;
   gap: 4px;
   border: 1px solid #273136;
   border-radius: 8px;
@@ -322,6 +325,15 @@ code {
 
   .workspace {
     min-height: 62vh;
+  }
+
+  .topbar {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .command-list {
+    grid-column: 1 / -1;
+    justify-self: start;
   }
 }
 
