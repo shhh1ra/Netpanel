@@ -12,10 +12,14 @@ type Action =
   | "protocol_neighbors"
   | "static_routes"
   | "route_lookup"
-  | "discovery_neighbors";
+  | "discovery_neighbors"
+  | "interface_diagnostics"
+  | "mac_table"
+  | "ip_location";
 
 type Protocol = "bgp" | "ospf";
 type DiscoveryProtocol = "cdp" | "lldp" | "both";
+type InterfaceView = "status" | "summary" | "detail";
 
 interface HostProfile {
   id: string;
@@ -34,12 +38,24 @@ interface CommandOption {
   description: string;
 }
 
+interface Presentation {
+  kind: "interface_status" | "interface_summary" | "interface_detail" | "mac_table" | "ip_location";
+  rows?: Record<string, any>[];
+  metrics?: { label: string; value: string }[];
+  sources?: { label: string; command: string; status: "found" | "empty" | "unsupported"; lines: string[] }[];
+  interface?: string;
+  state?: string;
+  protocol?: string;
+}
+
 const apiBase = ref("http://127.0.0.1:17761");
 const sessionId = ref("");
 const connectedTo = ref("");
 const isBusy = ref(false);
 const error = ref("");
 const output = ref("");
+const presentation = ref<Presentation | null>(null);
+const resultMode = ref<"human" | "raw">("human");
 const terminalOutput = ref("");
 const terminalInput = ref("");
 const terminalPane = ref<HTMLElement | null>(null);
@@ -66,6 +82,10 @@ const command = reactive({
   mac_address: "",
   interface: "",
   route_query: "",
+  interface_view: "status" as InterfaceView,
+  vlan: null as number | null,
+  dynamic_only: false,
+  ip_address: "",
   detail: false,
 });
 
@@ -78,6 +98,9 @@ const commandOptions: CommandOption[] = [
   { value: "static_routes", label: "Статические маршруты", description: "show ip route static" },
   { value: "route_lookup", label: "Поиск адреса или диапазона", description: "Проверка существования маршрута" },
   { value: "discovery_neighbors", label: "Соседи CDP / LLDP", description: "Топология, имена, платформы и порты" },
+  { value: "interface_diagnostics", label: "Статус интерфейсов", description: "Состояние, ошибки, загрузка и пропускная способность" },
+  { value: "mac_table", label: "Таблица MAC-адресов", description: "CAM-таблица с поиском по MAC или VLAN" },
+  { value: "ip_location", label: "Найти устройство по IP", description: "ARP, DHCP Snooping и IP Device Tracking" },
 ];
 
 const selectedOption = computed(() => commandOptions.find((item) => item.value === command.action));
@@ -86,6 +109,15 @@ const needsProtocol = computed(() => ["routing_table", "protocol_neighbors"].inc
 const needsMac = computed(() => command.action === "mac_on_interface");
 const needsRoute = computed(() => command.action === "route_lookup");
 const needsDiscovery = computed(() => command.action === "discovery_neighbors");
+const needsInterfaceDiagnostics = computed(() => command.action === "interface_diagnostics");
+const needsMacTable = computed(() => command.action === "mac_table");
+const needsIpLocation = computed(() => command.action === "ip_location");
+const canRunAction = computed(() => {
+  if (!isConnected.value || isBusy.value) return false;
+  if (needsInterfaceDiagnostics.value && command.interface_view === "detail") return Boolean(command.interface.trim());
+  if (needsIpLocation.value) return Boolean(command.ip_address.trim());
+  return true;
+});
 
 onMounted(async () => {
   await loadHostProfiles();
@@ -205,6 +237,7 @@ async function startBundledBackend() {
 async function connect() {
   error.value = "";
   output.value = "";
+  presentation.value = null;
   terminalOutput.value = "";
   terminalInput.value = "";
   issuedCommands.value = [];
@@ -247,6 +280,7 @@ async function runCommand() {
   if (!sessionId.value) return;
   error.value = "";
   output.value = "";
+  presentation.value = null;
   issuedCommands.value = [];
   activeWorkspace.value = "commands";
   isBusy.value = true;
@@ -258,6 +292,10 @@ async function runCommand() {
     mac_address: command.mac_address || null,
     interface: command.interface || null,
     route_query: command.route_query || null,
+    interface_view: command.interface_view,
+    vlan: command.vlan || null,
+    dynamic_only: command.dynamic_only,
+    ip_address: command.ip_address || null,
     detail: command.detail,
   };
 
@@ -270,6 +308,8 @@ async function runCommand() {
     const data = await parseResponse(response);
     issuedCommands.value = data.commands;
     output.value = data.output || "Команда выполнена без текстового вывода.";
+    presentation.value = data.presentation || null;
+    resultMode.value = presentation.value ? "human" : "raw";
   } catch (err) {
     error.value = errorMessage(err);
   } finally {
@@ -336,6 +376,63 @@ async function parseResponse(response: Response) {
 
 function errorMessage(err: unknown) {
   return err instanceof Error ? err.message : "Неизвестная ошибка";
+}
+
+function statusLabel(value: string) {
+  const labels: Record<string, string> = {
+    connected: "Подключён",
+    notconnect: "Нет подключения",
+    disabled: "Отключён",
+    "err-disabled": "Ошибка",
+    inactive: "Неактивен",
+  };
+  return labels[value.toLowerCase()] || value;
+}
+
+function formatRate(bitsPerSecond: number) {
+  if (!bitsPerSecond) return "0 бит/с";
+  if (bitsPerSecond >= 1_000_000_000) return `${(bitsPerSecond / 1_000_000_000).toFixed(1)} Гбит/с`;
+  if (bitsPerSecond >= 1_000_000) return `${(bitsPerSecond / 1_000_000).toFixed(1)} Мбит/с`;
+  if (bitsPerSecond >= 1_000) return `${(bitsPerSecond / 1_000).toFixed(1)} Кбит/с`;
+  return `${bitsPerSecond} бит/с`;
+}
+
+function speedLabel(value: string) {
+  const normalized = value.toLowerCase();
+  const automatic = normalized.startsWith("a-");
+  const speed = normalized.replace(/^a-/, "");
+  if (speed === "auto") return "Auto";
+  if (/^\d+$/.test(speed)) {
+    const numeric = Number(speed);
+    const label = numeric >= 1000 ? `${numeric / 1000} Гбит/с` : `${numeric} Мбит/с`;
+    return automatic ? `${label} (auto)` : label;
+  }
+  return value || "—";
+}
+
+function duplexLabel(value: string) {
+  const labels: Record<string, string> = {
+    full: "Full",
+    half: "Half",
+    "a-full": "Full (auto)",
+    "a-half": "Half (auto)",
+    auto: "Auto",
+  };
+  return labels[value.toLowerCase()] || value || "—";
+}
+
+function metricValue(metric: { label: string; value: string }) {
+  const value = Number(metric.value);
+  if (metric.label === "Пропускная способность") return formatRate(value * 1000);
+  if (metric.label.includes("трафик")) return formatRate(value);
+  if (metric.label.includes("пакеты")) return `${value} пак/с`;
+  if (metric.label === "MTU") return `${value} байт`;
+  if (metric.label === "Задержка") return `${value} мкс`;
+  if (metric.label === "Надёжность" || metric.label.includes("Загрузка")) {
+    const [current, maximum] = metric.value.split("/").map(Number);
+    if (maximum) return `${Math.round((current / maximum) * 100)}%`;
+  }
+  return metric.value;
 }
 </script>
 
@@ -441,6 +538,23 @@ function errorMessage(err: unknown) {
           </button>
         </div>
 
+        <div v-if="needsInterfaceDiagnostics" class="segmented">
+          <button type="button" :class="{ active: command.interface_view === 'status' }" @click="command.interface_view = 'status'">
+            Статус
+          </button>
+          <button type="button" :class="{ active: command.interface_view === 'summary' }" @click="command.interface_view = 'summary'">
+            Сводка
+          </button>
+          <button type="button" :class="{ active: command.interface_view === 'detail' }" @click="command.interface_view = 'detail'">
+            Интерфейс
+          </button>
+        </div>
+
+        <label v-if="needsInterfaceDiagnostics && command.interface_view === 'detail'">
+          Интерфейс
+          <input v-model="command.interface" placeholder="FastEthernet0/1" autocomplete="off" />
+        </label>
+
         <label v-if="needsMac">
           MAC-адрес
           <input v-model="command.mac_address" placeholder="0011.2233.4455" autocomplete="off" />
@@ -449,9 +563,29 @@ function errorMessage(err: unknown) {
           Интерфейс, если нужно уточнить
           <input v-model="command.interface" placeholder="FastEthernet0/1" autocomplete="off" />
         </label>
+
+        <div v-if="needsMacTable" class="grid two">
+          <label>
+            MAC-адрес
+            <input v-model="command.mac_address" placeholder="0011.2233.4455" autocomplete="off" />
+          </label>
+          <label>
+            VLAN
+            <input v-model.number="command.vlan" type="number" min="1" max="4094" placeholder="10" />
+          </label>
+        </div>
+        <label v-if="needsMacTable" class="check">
+          <input v-model="command.dynamic_only" type="checkbox" />
+          Только динамические записи
+        </label>
+
         <label v-if="needsRoute">
           Адрес или CIDR
           <input v-model="command.route_query" placeholder="10.10.10.0/24" autocomplete="off" />
+        </label>
+        <label v-if="needsIpLocation">
+          IP-адрес
+          <input v-model="command.ip_address" placeholder="10.10.10.25" autocomplete="off" />
         </label>
 
         <label v-if="needsDiscovery || command.action === 'protocol_neighbors'" class="check">
@@ -459,7 +593,7 @@ function errorMessage(err: unknown) {
           Подробный вывод
         </label>
 
-        <button class="run" type="button" :disabled="isBusy || !isConnected" @click="runCommand">
+        <button class="run" type="button" :disabled="!canRunAction" @click="runCommand">
           {{ isBusy ? "Выполняю..." : "Выполнить" }}
         </button>
       </section>
@@ -486,7 +620,7 @@ function errorMessage(err: unknown) {
 
       <div v-if="error" class="notice error">{{ error }}</div>
 
-      <div v-if="activeWorkspace === 'commands'" class="terminal-wrap">
+      <div v-if="activeWorkspace === 'commands'" class="terminal-wrap command-result">
         <button
           v-if="output"
           class="copy-output"
@@ -497,7 +631,123 @@ function errorMessage(err: unknown) {
         >
           {{ copied ? "✓" : "⧉" }}
         </button>
-        <pre class="terminal" :class="{ empty: !output }">{{ output || "После подключения выбери действие слева. Результат появится здесь." }}</pre>
+
+        <div v-if="presentation" class="result-toolbar">
+          <div class="result-tabs">
+            <button type="button" :class="{ active: resultMode === 'human' }" @click="resultMode = 'human'">Обзор</button>
+            <button type="button" :class="{ active: resultMode === 'raw' }" @click="resultMode = 'raw'">Raw</button>
+          </div>
+        </div>
+
+        <div v-if="presentation && resultMode === 'human'" class="human-output">
+          <div v-if="presentation.kind === 'interface_status'" class="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Состояние</th>
+                  <th>Интерфейс</th>
+                  <th>Имя</th>
+                  <th>VLAN</th>
+                  <th>Duplex</th>
+                  <th>Скорость</th>
+                  <th>Тип</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="row in presentation.rows" :key="row.port">
+                  <td><span class="state-dot" :class="{ up: row.up }"></span>{{ statusLabel(row.status) }}</td>
+                  <td class="mono">{{ row.port }}</td>
+                  <td>{{ row.name || "—" }}</td>
+                  <td>{{ row.vlan || "—" }}</td>
+                  <td>{{ duplexLabel(row.duplex) }}</td>
+                  <td>{{ speedLabel(row.speed) }}</td>
+                  <td>{{ row.type || "—" }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div v-else-if="presentation.kind === 'interface_summary'" class="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Состояние</th>
+                  <th>Интерфейс</th>
+                  <th>Приём</th>
+                  <th>Передача</th>
+                  <th>RX пак/с</th>
+                  <th>TX пак/с</th>
+                  <th>Потери</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="row in presentation.rows" :key="row.interface">
+                  <td><span class="state-dot" :class="{ up: row.up }"></span>{{ row.up ? "UP" : "DOWN" }}</td>
+                  <td class="mono">{{ row.interface }}</td>
+                  <td>{{ formatRate(row.rx_bps) }}</td>
+                  <td>{{ formatRate(row.tx_bps) }}</td>
+                  <td>{{ row.rx_pps }}</td>
+                  <td>{{ row.tx_pps }}</td>
+                  <td :class="{ warning: row.input_drops + row.output_drops > 0 }">
+                    {{ row.input_drops + row.output_drops }}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div v-else-if="presentation.kind === 'interface_detail'" class="detail-output">
+            <div class="detail-heading">
+              <div>
+                <span class="eyebrow">Интерфейс</span>
+                <strong class="mono">{{ presentation.interface || "—" }}</strong>
+              </div>
+              <div class="detail-states">
+                <span :class="{ good: presentation.state === 'up' }">Порт: {{ presentation.state || "неизвестно" }}</span>
+                <span :class="{ good: presentation.protocol === 'up' }">Протокол: {{ presentation.protocol || "неизвестно" }}</span>
+              </div>
+            </div>
+            <dl class="metric-grid">
+              <div v-for="metric in presentation.metrics" :key="metric.label">
+                <dt>{{ metric.label }}</dt>
+                <dd>{{ metricValue(metric) }}</dd>
+              </div>
+            </dl>
+          </div>
+
+          <div v-else-if="presentation.kind === 'mac_table'" class="table-scroll">
+            <table>
+              <thead>
+                <tr><th>VLAN</th><th>MAC-адрес</th><th>Тип</th><th>Порт</th></tr>
+              </thead>
+              <tbody>
+                <tr v-for="(row, index) in presentation.rows" :key="`${row.mac}-${row.vlan}-${index}`">
+                  <td>{{ row.vlan }}</td>
+                  <td class="mono">{{ row.mac }}</td>
+                  <td>{{ row.entry_type === "DYNAMIC" ? "Динамический" : row.entry_type }}</td>
+                  <td class="mono">{{ row.port }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div v-else-if="presentation.kind === 'ip_location'" class="source-list">
+            <section v-for="source in presentation.sources" :key="source.label" class="source-section">
+              <header>
+                <div>
+                  <strong>{{ source.label }}</strong>
+                  <code>{{ source.command }}</code>
+                </div>
+                <span class="source-status" :class="source.status">
+                  {{ source.status === "found" ? "Найдено" : source.status === "unsupported" ? "Не поддерживается" : "Нет данных" }}
+                </span>
+              </header>
+              <pre v-if="source.lines.length">{{ source.lines.join("\n") }}</pre>
+            </section>
+          </div>
+        </div>
+
+        <pre v-else class="terminal" :class="{ empty: !output }">{{ output || "После подключения выбери действие слева. Результат появится здесь." }}</pre>
       </div>
 
       <div v-else class="terminal-wrap interactive-terminal">

@@ -364,6 +364,227 @@ body { overflow: hidden; }
 .copy-output { position: absolute; z-index: 2; top: 12px; right: 28px; display: grid; place-items: center; width: 38px; height: 38px; min-height: 38px; padding: 0; border: 1px solid #2c3a40; background: #101719; color: #7de4ef; font-size: 1.25rem; line-height: 1; box-shadow: 0 4px 14px rgba(0,0,0,.35); }
 .copy-output:hover { border-color: #38b8c8; background: #142226; color: #d7fbff; }
 
+.command-result {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  border: 1px solid #273136;
+  border-radius: 8px;
+  background: #030506;
+}
+
+.command-result > .terminal {
+  border: 0;
+  border-radius: 0;
+}
+
+.result-toolbar {
+  display: flex;
+  align-items: center;
+  min-height: 54px;
+  border-bottom: 1px solid #1d272b;
+  padding: 8px 72px 8px 12px;
+}
+
+.result-tabs {
+  display: inline-grid;
+  grid-auto-flow: column;
+  gap: 3px;
+  border: 1px solid #273136;
+  border-radius: 7px;
+  padding: 3px;
+}
+
+.result-tabs button {
+  min-height: 30px;
+  border-radius: 5px;
+  background: transparent;
+  color: #8d9aa0;
+  font-size: .8rem;
+  font-weight: 750;
+}
+
+.result-tabs button.active {
+  background: #162328;
+  color: #7de4ef;
+}
+
+.human-output {
+  min-height: 0;
+  overflow: auto;
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
+}
+
+.table-scroll {
+  min-width: 760px;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  color: #dce5e8;
+  font-size: .84rem;
+}
+
+th,
+td {
+  border-bottom: 1px solid #192226;
+  padding: 12px 14px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+th {
+  position: sticky;
+  z-index: 1;
+  top: 0;
+  background: #090d0f;
+  color: #829097;
+  font-size: .72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+tbody tr:hover {
+  background: #081114;
+}
+
+.mono {
+  font-family: "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
+}
+
+.state-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 8px;
+  border-radius: 50%;
+  background: #586167;
+}
+
+.state-dot.up {
+  background: #36d89a;
+  box-shadow: 0 0 8px rgba(54, 216, 154, .45);
+}
+
+.warning {
+  color: #ffb866;
+  font-weight: 800;
+}
+
+.detail-output {
+  padding: 18px;
+}
+
+.detail-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid #1d272b;
+}
+
+.detail-heading strong {
+  display: block;
+  margin-top: 5px;
+  font-size: 1.05rem;
+}
+
+.detail-states {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.detail-states span,
+.source-status {
+  border-radius: 999px;
+  background: #22292d;
+  color: #a5b0b5;
+  padding: 5px 9px;
+  font-size: .76rem;
+  font-weight: 750;
+}
+
+.detail-states span.good,
+.source-status.found {
+  background: #082d24;
+  color: #5be0a9;
+}
+
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 0;
+  margin: 0;
+}
+
+.metric-grid div {
+  min-width: 0;
+  border-bottom: 1px solid #182126;
+  padding: 16px 12px;
+}
+
+.metric-grid dt {
+  color: #829097;
+  font-size: .76rem;
+}
+
+.metric-grid dd {
+  margin: 7px 0 0;
+  color: #f2f7f8;
+  font-size: 1rem;
+  font-weight: 750;
+}
+
+.source-list {
+  padding: 4px 18px 18px;
+}
+
+.source-section {
+  border-bottom: 1px solid #1d272b;
+  padding: 16px 0;
+}
+
+.source-section header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.source-section header div {
+  display: grid;
+  gap: 7px;
+}
+
+.source-section code {
+  border: 0;
+  background: transparent;
+  padding: 0;
+}
+
+.source-section pre {
+  overflow: auto;
+  margin: 14px 0 0;
+  color: #d7e3e7;
+  font-family: "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: .82rem;
+  white-space: pre-wrap;
+}
+
+.source-status.empty {
+  background: #202428;
+  color: #8f999e;
+}
+
+.source-status.unsupported {
+  background: #351d10;
+  color: #ffb866;
+}
+
 .interactive-terminal {
   display: grid;
   grid-template-rows: minmax(0, 1fr) auto;
