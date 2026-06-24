@@ -1,23 +1,23 @@
-app-id: local.cisco-client.app
+app-id: local.netpanel.app
 runtime: org.gnome.Platform
 runtime-version: "46"
 sdk: org.gnome.Sdk
-command: cisco-client
+command: netpanel
 finish-args:
   - --share=network
   - --socket=x11
   - --socket=wayland
   - --device=dri
 modules:
-  - name: cisco-client
+  - name: netpanel
     buildsystem: simple
     build-commands:
-      - install -Dm755 cisco-client /app/bin/cisco-client
-      - mkdir -p /app/lib/cisco-client
-      - cp -r bundle/* /app/lib/cisco-client/
+      - install -Dm755 netpanel /app/bin/netpanel
+      - mkdir -p /app/lib/netpanel
+      - cp -r bundle/* /app/lib/netpanel/
     sources:
       - type: file
-        path: ../../frontend/src-tauri/target/release/cisco-client
+        path: ../../frontend/src-tauri/target/release/netpanel
       - type: dir
         path: ../../frontend/src-tauri/target/release/bundle
         dest: bundle

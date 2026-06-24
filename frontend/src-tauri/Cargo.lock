@@ -312,14 +312,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "cisco-client"
-version = "0.1.9"
-dependencies = [
- "tauri",
- "tauri-build",
-]
-
-[[package]]
 name = "clipboard-win"
 version = "5.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1832,6 +1824,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6e5a6ae77c8ee183dcbbba6150e2e6b9f3f4196a7666c02a715a95692ec1fa97"
 dependencies = [
  "jni-sys 0.3.1",
+]
+
+[[package]]
+name = "netpanel"
+version = "0.2.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
 ]
 
 [[package]]

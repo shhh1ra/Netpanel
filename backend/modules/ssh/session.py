@@ -20,6 +20,11 @@ class SSHSession:
             raise RuntimeError("SSH session is not connected")
         return await self.client.run_command(command)
 
+    async def terminal(self, command: str):
+        if not self.is_connected:
+            raise RuntimeError("SSH session is not connected")
+        return await self.client.run_terminal_command(command)
+
     async def disconnect(self):
         await self.client.close()
         self.is_connected = False

@@ -55,6 +55,12 @@ class SSHClient:
             output = await self._read_until_prompt(timeout=timeout)
             return self._clean_output(command, output)
 
+    async def run_terminal_command(self, command: str, timeout: float = 60) -> str:
+        command = command.strip()
+        if not command:
+            return ""
+        return await self.run_command(command, timeout=timeout)
+
     async def _read_until_prompt(self, timeout: float = 20) -> str:
         if not self.process:
             raise RuntimeError("SSH shell is not open")

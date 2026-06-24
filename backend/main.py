@@ -63,8 +63,17 @@ class CommandResponse(BaseModel):
     output: str
 
 
+class TerminalRequest(BaseModel):
+    command: str = Field(min_length=1, max_length=512)
+
+
+class TerminalResponse(BaseModel):
+    command: str
+    output: str
+
+
 manager = SSHManager()
-app = FastAPI(title="Cisco Client API", version="0.1.0")
+app = FastAPI(title="Netpanel API", version="0.2.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -121,6 +130,21 @@ async def run_action(session_id: str, payload: CommandRequest):
         chunks.append(f"$ {command}\n{result}".strip())
 
     return CommandResponse(action=payload.action, commands=commands, output="\n\n".join(chunks))
+
+
+@app.post("/sessions/{session_id}/terminal", response_model=TerminalResponse)
+async def run_terminal_command(session_id: str, payload: TerminalRequest):
+    session = manager.get_session(session_id)
+    if not session or not session.is_connected:
+        raise HTTPException(status_code=404, detail="SSH session is not connected")
+
+    command = payload.command.strip()
+    try:
+        result = await session.terminal(command)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Terminal command failed: {exc}") from exc
+
+    return TerminalResponse(command=command, output=result)
 
 
 def build_commands(payload: CommandRequest) -> list[str]:

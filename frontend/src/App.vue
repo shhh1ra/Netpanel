@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { writeText } from "@tauri-apps/api/clipboard";
 import { Command, Child } from "@tauri-apps/api/shell";
-import { computed, onMounted, reactive, ref } from "vue";
+import { invoke } from "@tauri-apps/api/tauri";
+import { computed, nextTick, onMounted, reactive, ref } from "vue";
 
 type Action =
   | "running_config"
@@ -22,6 +23,9 @@ interface HostProfile {
   host: string;
   port: number;
   username: string;
+  password: string;
+  authType: "password" | "key";
+  keyPath?: string;
 }
 
 interface CommandOption {
@@ -36,13 +40,17 @@ const connectedTo = ref("");
 const isBusy = ref(false);
 const error = ref("");
 const output = ref("");
+const terminalOutput = ref("");
+const terminalInput = ref("");
+const terminalPane = ref<HTMLElement | null>(null);
 const issuedCommands = ref<string[]>([]);
 const copied = ref(false);
+const activeWorkspace = ref<"commands" | "terminal">("commands");
 const backendChild = ref<Child | null>(null);
 const hostProfiles = ref<HostProfile[]>([]);
 const selectedHostId = ref("");
 const hostProfileName = ref("");
-const HOSTS_STORAGE_KEY = "cisco-client-hosts";
+const HOSTS_STORAGE_KEY = "netpanel-hosts";
 
 const connection = reactive({
   host: "",
@@ -79,21 +87,56 @@ const needsMac = computed(() => command.action === "mac_on_interface");
 const needsRoute = computed(() => command.action === "route_lookup");
 const needsDiscovery = computed(() => command.action === "discovery_neighbors");
 
-onMounted(() => {
-  loadHostProfiles();
+onMounted(async () => {
+  await loadHostProfiles();
   void startBundledBackend();
 });
 
-function loadHostProfiles() {
+async function loadHostProfiles() {
+  let legacyProfiles: Partial<HostProfile>[] = [];
   try {
-    hostProfiles.value = JSON.parse(localStorage.getItem(HOSTS_STORAGE_KEY) || "[]");
+    legacyProfiles = JSON.parse(localStorage.getItem(HOSTS_STORAGE_KEY) || "[]");
   } catch {
-    hostProfiles.value = [];
+    localStorage.removeItem(HOSTS_STORAGE_KEY);
+  }
+
+  try {
+    const storedProfiles = await invoke<HostProfile[] | null>("load_host_profiles");
+    hostProfiles.value = (storedProfiles ?? legacyProfiles).map((profile) => ({
+      id: profile.id || `${Date.now()}`,
+      name: profile.name || profile.host || "Cisco",
+      host: profile.host || "",
+      port: profile.port || 22,
+      username: profile.username || "",
+      password: profile.password || "",
+      authType: profile.authType || "password",
+      keyPath: profile.keyPath,
+    }));
+
+    if (storedProfiles === null && hostProfiles.value.length) {
+      await persistHostProfiles();
+    }
+    localStorage.removeItem(HOSTS_STORAGE_KEY);
+  } catch {
+    hostProfiles.value = legacyProfiles.map((profile) => ({
+      id: profile.id || `${Date.now()}`,
+      name: profile.name || profile.host || "Cisco",
+      host: profile.host || "",
+      port: profile.port || 22,
+      username: profile.username || "",
+      password: profile.password || "",
+      authType: profile.authType || "password",
+      keyPath: profile.keyPath,
+    }));
   }
 }
 
-function persistHostProfiles() {
-  localStorage.setItem(HOSTS_STORAGE_KEY, JSON.stringify(hostProfiles.value));
+async function persistHostProfiles() {
+  try {
+    await invoke("save_host_profiles", { profiles: hostProfiles.value });
+  } catch {
+    localStorage.setItem(HOSTS_STORAGE_KEY, JSON.stringify(hostProfiles.value));
+  }
 }
 
 function selectHostProfile() {
@@ -107,7 +150,7 @@ function selectHostProfile() {
   connection.host = profile.host;
   connection.port = profile.port;
   connection.username = profile.username;
-  connection.password = "";
+  connection.password = profile.password;
 }
 
 function saveHostProfile() {
@@ -120,6 +163,9 @@ function saveHostProfile() {
     host: connection.host.trim(),
     port: connection.port,
     username: connection.username.trim(),
+    password: connection.password,
+    authType: existing?.authType || "password",
+    keyPath: existing?.keyPath,
   };
 
   if (existing) {
@@ -130,7 +176,7 @@ function saveHostProfile() {
   }
 
   hostProfileName.value = profile.name;
-  persistHostProfiles();
+  void persistHostProfiles();
 }
 
 function deleteHostProfile() {
@@ -138,13 +184,13 @@ function deleteHostProfile() {
   hostProfiles.value = hostProfiles.value.filter((item) => item.id !== selectedHostId.value);
   selectedHostId.value = "";
   hostProfileName.value = "";
-  persistHostProfiles();
+  void persistHostProfiles();
 }
 
 async function startBundledBackend() {
 
   try {
-    const backend = Command.sidecar("../sidecars/cisco-backend", [], {
+    const backend = Command.sidecar("../sidecars/netpanel-backend", [], {
       env: {
         CISCO_CLIENT_HOST: "127.0.0.1",
         CISCO_CLIENT_PORT: "17761",
@@ -159,6 +205,8 @@ async function startBundledBackend() {
 async function connect() {
   error.value = "";
   output.value = "";
+  terminalOutput.value = "";
+  terminalInput.value = "";
   issuedCommands.value = [];
   isBusy.value = true;
 
@@ -171,6 +219,8 @@ async function connect() {
     const data = await parseResponse(response);
     sessionId.value = data.session_id;
     connectedTo.value = `${data.username}@${data.host}`;
+    terminalOutput.value = `Подключено к ${data.username}@${data.host}`;
+    await scrollTerminalToEnd();
   } catch (err) {
     error.value = errorMessage(err);
   } finally {
@@ -188,6 +238,7 @@ async function disconnect() {
   } finally {
     sessionId.value = "";
     connectedTo.value = "";
+    terminalInput.value = "";
     isBusy.value = false;
   }
 }
@@ -197,6 +248,7 @@ async function runCommand() {
   error.value = "";
   output.value = "";
   issuedCommands.value = [];
+  activeWorkspace.value = "commands";
   isBusy.value = true;
 
   const payload = {
@@ -225,10 +277,47 @@ async function runCommand() {
   }
 }
 
-async function copyOutput() {
-  if (!output.value) return;
+async function runTerminalCommand() {
+  if (!sessionId.value || !terminalInput.value.trim()) return;
 
-  await writeText(output.value);
+  const rawCommand = terminalInput.value.trim();
+  terminalInput.value = "";
+  error.value = "";
+  isBusy.value = true;
+  activeWorkspace.value = "terminal";
+  terminalOutput.value += `${terminalOutput.value ? "\n\n" : ""}$ ${rawCommand}\n`;
+  await scrollTerminalToEnd();
+
+  try {
+    const response = await fetch(`${apiBase.value}/sessions/${sessionId.value}/terminal`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ command: rawCommand }),
+    });
+    const data = await parseResponse(response);
+    terminalOutput.value += data.output || "Команда выполнена без текстового вывода.";
+  } catch (err) {
+    const message = errorMessage(err);
+    error.value = message;
+    terminalOutput.value += `Ошибка: ${message}`;
+  } finally {
+    await scrollTerminalToEnd();
+    isBusy.value = false;
+  }
+}
+
+async function scrollTerminalToEnd() {
+  await nextTick();
+  if (terminalPane.value) {
+    terminalPane.value.scrollTop = terminalPane.value.scrollHeight;
+  }
+}
+
+async function copyOutput() {
+  const text = activeWorkspace.value === "terminal" ? terminalOutput.value : output.value;
+  if (!text) return;
+
+  await writeText(text);
 
   copied.value = true;
   window.setTimeout(() => {
@@ -256,7 +345,7 @@ function errorMessage(err: unknown) {
       <div class="brand">
         <div class="mark">2960</div>
         <div>
-          <h1>Cisco Client</h1>
+          <h1>Netpanel</h1>
           <p>SSH-панель для быстрых show-команд</p>
         </div>
       </div>
@@ -382,14 +471,22 @@ function errorMessage(err: unknown) {
           <span class="eyebrow">Сессия</span>
           <strong>{{ connectedTo || "нет подключения" }}</strong>
         </div>
-        <div class="command-list" v-if="issuedCommands.length">
+        <div class="workspace-tabs">
+          <button type="button" :class="{ active: activeWorkspace === 'commands' }" @click="activeWorkspace = 'commands'">
+            Команды
+          </button>
+          <button type="button" :class="{ active: activeWorkspace === 'terminal' }" @click="activeWorkspace = 'terminal'">
+            Терминал
+          </button>
+        </div>
+        <div class="command-list" v-if="activeWorkspace === 'commands' && issuedCommands.length">
           <code v-for="item in issuedCommands" :key="item">{{ item }}</code>
         </div>
       </header>
 
       <div v-if="error" class="notice error">{{ error }}</div>
 
-      <div class="terminal-wrap">
+      <div v-if="activeWorkspace === 'commands'" class="terminal-wrap">
         <button
           v-if="output"
           class="copy-output"
@@ -401,6 +498,30 @@ function errorMessage(err: unknown) {
           {{ copied ? "✓" : "⧉" }}
         </button>
         <pre class="terminal" :class="{ empty: !output }">{{ output || "После подключения выбери действие слева. Результат появится здесь." }}</pre>
+      </div>
+
+      <div v-else class="terminal-wrap interactive-terminal">
+        <button
+          v-if="terminalOutput"
+          class="copy-output"
+          type="button"
+          :title="copied ? 'Скопировано' : 'Копировать терминал'"
+          :aria-label="copied ? 'Скопировано' : 'Копировать терминал'"
+          @click="copyOutput"
+        >
+          {{ copied ? "✓" : "⧉" }}
+        </button>
+        <pre ref="terminalPane" class="terminal" :class="{ empty: !terminalOutput }">{{ terminalOutput || "Подключись к устройству и отправляй команды прямо отсюда." }}</pre>
+        <form class="terminal-input" @submit.prevent="runTerminalCommand">
+          <span>$</span>
+          <input
+            v-model="terminalInput"
+            :disabled="isBusy || !isConnected"
+            autocomplete="off"
+            placeholder="show interfaces status"
+          />
+          <button type="submit" :disabled="isBusy || !isConnected || !terminalInput.trim()">Ввод</button>
+        </form>
       </div>
     </section>
   </main>
