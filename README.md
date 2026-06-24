@@ -1,6 +1,6 @@
 # Netpanel
 
-Легкий SSH-клиент для Cisco 2960: Python backend выполняет show-команды через SSH, Vue + Tauri frontend дает компактный операторский интерфейс.
+Легкий SSH-клиент для сетевого оборудования Cisco: Python backend выполняет show-команды через SSH, Vue + Tauri frontend дает компактный операторский интерфейс.
 
 ## Backend
 
