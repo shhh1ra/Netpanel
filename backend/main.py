@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import ipaddress
 import re
 from enum import Enum
 from typing import Any
 from uuid import uuid4
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -89,7 +90,7 @@ class TerminalResponse(BaseModel):
 
 
 manager = SSHManager()
-app = FastAPI(title="Netpanel API", version="1.2.1")
+app = FastAPI(title="Netpanel API", version="1.3.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -181,6 +182,64 @@ async def interrupt_terminal(session_id: str):
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Terminal interrupt failed: {exc}") from exc
     return {"status": "interrupted"}
+
+
+@app.websocket("/sessions/{session_id}/terminal/ws")
+async def terminal_websocket(websocket: WebSocket, session_id: str):
+    session = manager.get_session(session_id)
+    if not session or not session.is_connected:
+        await websocket.close(code=4404, reason="SSH session is not connected")
+        return
+
+    await websocket.accept()
+    try:
+        prompt = await session.attach_terminal()
+    except Exception as exc:
+        await websocket.close(code=4409, reason=str(exc))
+        return
+
+    async def receive_input():
+        try:
+            while True:
+                message = await websocket.receive_json()
+                message_type = message.get("type")
+                if message_type == "input":
+                    session.terminal_write(str(message.get("data", "")))
+                elif message_type == "resize":
+                    columns = max(20, min(500, int(message.get("columns", 120))))
+                    rows = max(5, min(200, int(message.get("rows", 40))))
+                    session.resize_terminal(columns, rows)
+        except WebSocketDisconnect:
+            return
+
+    async def send_output():
+        try:
+            if prompt:
+                await websocket.send_json({"type": "output", "data": prompt})
+            while True:
+                data = await session.terminal_read()
+                if not data:
+                    return
+                await websocket.send_json({"type": "output", "data": data})
+        except WebSocketDisconnect:
+            return
+
+    input_task = asyncio.create_task(receive_input())
+    output_task = asyncio.create_task(send_output())
+    try:
+        done, pending = await asyncio.wait(
+            {input_task, output_task},
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        for task in pending:
+            task.cancel()
+        await asyncio.gather(*pending, return_exceptions=True)
+        for task in done:
+            task.result()
+    except (WebSocketDisconnect, RuntimeError):
+        pass
+    finally:
+        session.detach_terminal()
 
 
 def build_commands(payload: CommandRequest) -> list[str]:

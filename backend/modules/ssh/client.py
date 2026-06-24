@@ -27,6 +27,8 @@ class SSHClient:
         self.info: SSHConnectionInfo | None = None
         self.prompt = ""
         self._lock = asyncio.Lock()
+        self._terminal_attached = False
+        self._terminal_prompt_buffer = ""
 
     async def connect_password(self, host: str, port: int, username: str, password: str):
         self.conn = await asyncssh.connect(
@@ -77,6 +79,44 @@ class SSHClient:
             raise RuntimeError("SSHClient not connected")
         self.process.stdin.write("\x03")
 
+    async def attach_terminal(self) -> str:
+        if not self.conn or not self.process:
+            raise RuntimeError("SSHClient not connected")
+        if self._terminal_attached:
+            raise RuntimeError("Terminal is already attached")
+
+        await self._lock.acquire()
+        self._terminal_attached = True
+        self._terminal_prompt_buffer = ""
+        return self.prompt
+
+    def terminal_write(self, data: str):
+        if not self.process or not self._terminal_attached:
+            raise RuntimeError("Terminal is not attached")
+        self.process.stdin.write(data)
+
+    async def terminal_read(self, size: int = 4096) -> str:
+        if not self.process or not self._terminal_attached:
+            raise RuntimeError("Terminal is not attached")
+        data = await self.process.stdout.read(size)
+        if data:
+            self._terminal_prompt_buffer = (self._terminal_prompt_buffer + data)[-1024:]
+            self._update_prompt(self._terminal_prompt_buffer)
+        return data
+
+    def resize_terminal(self, columns: int, rows: int):
+        if not self.process or not self._terminal_attached:
+            return
+        self.process.change_terminal_size(columns, rows)
+
+    def detach_terminal(self):
+        if not self._terminal_attached:
+            return
+        self._terminal_attached = False
+        self._terminal_prompt_buffer = ""
+        if self._lock.locked():
+            self._lock.release()
+
     async def _read_until_prompt(self, timeout: float = 20) -> str:
         if not self.process:
             raise RuntimeError("SSH shell is not open")
@@ -114,6 +154,7 @@ class SSHClient:
         return "\n".join(lines).strip()
 
     async def close(self):
+        self.detach_terminal()
         if self.process:
             self.process.stdin.write("exit\n")
             self.process.stdin.write_eof()

@@ -2,7 +2,10 @@
 import { writeText } from "@tauri-apps/api/clipboard";
 import { Command, Child } from "@tauri-apps/api/shell";
 import { invoke } from "@tauri-apps/api/tauri";
-import { computed, nextTick, onMounted, reactive, ref, watch } from "vue";
+import { FitAddon } from "@xterm/addon-fit";
+import { Terminal as XTerm } from "@xterm/xterm";
+import "@xterm/xterm/css/xterm.css";
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 
 type Action =
   | "running_config"
@@ -57,13 +60,9 @@ const error = ref("");
 const output = ref("");
 const presentation = ref<Presentation | null>(null);
 const resultMode = ref<"human" | "raw">("human");
-const terminalOutput = ref("");
-const terminalInput = ref("");
-const terminalInputField = ref<HTMLInputElement | null>(null);
-const terminalPane = ref<HTMLElement | null>(null);
-const terminalHistory = ref<string[]>([]);
-const terminalHistoryIndex = ref(0);
-const terminalHistoryDraft = ref("");
+const terminalHost = ref<HTMLElement | null>(null);
+const passwordInputField = ref<HTMLInputElement | null>(null);
+const rememberPassword = ref(true);
 const issuedCommands = ref<string[]>([]);
 const copied = ref(false);
 const activeWorkspace = ref<"commands" | "terminal">("commands");
@@ -72,48 +71,10 @@ const hostProfiles = ref<HostProfile[]>([]);
 const selectedHostId = ref("");
 const hostProfileName = ref("");
 const HOSTS_STORAGE_KEY = "netpanel-hosts";
-const IOS_COMPLETIONS = [
-  "show running-config",
-  "show startup-config",
-  "show version",
-  "show inventory",
-  "show ip interface brief",
-  "show interfaces status",
-  "show interfaces summary",
-  "show interfaces",
-  "show ip arp",
-  "show mac address-table",
-  "show mac address-table dynamic",
-  "show vlan brief",
-  "show cdp neighbors",
-  "show cdp neighbors detail",
-  "show lldp neighbors",
-  "show lldp neighbors detail",
-  "show ip route",
-  "show ip route static",
-  "show ip bgp summary",
-  "show ip ospf neighbor",
-  "show ip dhcp snooping binding",
-  "show ip device tracking",
-  "configure terminal",
-  "interface",
-  "interface range",
-  "description",
-  "ip address",
-  "ip address dhcp",
-  "ip address negotiated",
-  "ip address secondary",
-  "no ip address",
-  "switchport mode access",
-  "switchport access vlan",
-  "switchport mode trunk",
-  "shutdown",
-  "no shutdown",
-  "exit",
-  "end",
-  "write memory",
-  "copy running-config startup-config",
-];
+let xterm: XTerm | null = null;
+let fitAddon: FitAddon | null = null;
+let terminalSocket: WebSocket | null = null;
+let terminalResizeObserver: ResizeObserver | null = null;
 
 const connection = reactive({
   host: "",
@@ -170,12 +131,25 @@ const canRunAction = computed(() => {
 onMounted(async () => {
   await loadHostProfiles();
   void startBundledBackend();
+  await nextTick();
+  initializeTerminal();
 });
 
 watch(activeWorkspace, async (workspace) => {
   if (workspace === "terminal") {
-    await focusTerminalInput();
+    await nextTick();
+    fitTerminal();
+    openTerminalSocket();
+    xterm?.focus();
+  } else {
+    await closeTerminalSocket();
   }
+});
+
+onBeforeUnmount(() => {
+  terminalResizeObserver?.disconnect();
+  terminalSocket?.close();
+  xterm?.dispose();
 });
 
 async function loadHostProfiles() {
@@ -221,7 +195,8 @@ async function persistHostProfiles() {
   try {
     await invoke("save_host_profiles", { profiles: hostProfiles.value });
   } catch {
-    localStorage.setItem(HOSTS_STORAGE_KEY, JSON.stringify(hostProfiles.value));
+    const profilesWithoutPasswords = hostProfiles.value.map((profile) => ({ ...profile, password: "" }));
+    localStorage.setItem(HOSTS_STORAGE_KEY, JSON.stringify(profilesWithoutPasswords));
   }
 }
 
@@ -242,9 +217,12 @@ async function selectHostProfile() {
   connection.port = profile.port;
   connection.username = profile.username;
   connection.password = profile.password;
+  rememberPassword.value = Boolean(profile.password);
 
-  if (shouldReconnect) {
+  if (shouldReconnect && profile.password) {
     await connect();
+  } else if (!profile.password) {
+    await focusPasswordInput();
   }
 }
 
@@ -258,7 +236,7 @@ function saveHostProfile() {
     host: connection.host.trim(),
     port: connection.port,
     username: connection.username.trim(),
-    password: connection.password,
+    password: rememberPassword.value ? connection.password : "",
     authType: existing?.authType || "password",
     keyPath: existing?.keyPath,
   };
@@ -298,14 +276,16 @@ async function startBundledBackend() {
 }
 
 async function connect() {
+  if (!connection.password) {
+    error.value = "Введите пароль для подключения";
+    await focusPasswordInput();
+    return;
+  }
+
   error.value = "";
   output.value = "";
   presentation.value = null;
-  terminalOutput.value = "";
-  terminalInput.value = "";
-  terminalHistory.value = [];
-  terminalHistoryIndex.value = 0;
-  terminalHistoryDraft.value = "";
+  xterm?.reset();
   issuedCommands.value = [];
   isBusy.value = true;
 
@@ -318,15 +298,13 @@ async function connect() {
     const data = await parseResponse(response);
     sessionId.value = data.session_id;
     connectedTo.value = `${data.username}@${data.host}`;
-    terminalOutput.value = `Подключено к ${data.username}@${data.host}`;
-    await scrollTerminalToEnd();
+    if (activeWorkspace.value === "terminal") {
+      openTerminalSocket();
+    }
   } catch (err) {
     error.value = errorMessage(err);
   } finally {
     isBusy.value = false;
-    if (activeWorkspace.value === "terminal") {
-      await focusTerminalInput();
-    }
   }
 }
 
@@ -334,22 +312,20 @@ async function disconnect() {
   if (!sessionId.value) return;
   isBusy.value = true;
   error.value = "";
+  await closeTerminalSocket();
 
   try {
     await fetch(`${apiBase.value}/sessions/${sessionId.value}`, { method: "DELETE" });
   } finally {
     sessionId.value = "";
     connectedTo.value = "";
-    terminalInput.value = "";
-    terminalHistory.value = [];
-    terminalHistoryIndex.value = 0;
-    terminalHistoryDraft.value = "";
     isBusy.value = false;
   }
 }
 
 async function runCommand() {
   if (!sessionId.value) return;
+  await closeTerminalSocket();
   error.value = "";
   output.value = "";
   presentation.value = null;
@@ -389,191 +365,131 @@ async function runCommand() {
   }
 }
 
-async function runTerminalCommand() {
-  if (!sessionId.value || isBusy.value || !terminalInput.value.trim()) return;
-
-  const rawCommand = terminalInput.value.trim();
-  if (terminalHistory.value[terminalHistory.value.length - 1] !== rawCommand) {
-    terminalHistory.value.push(rawCommand);
-    if (terminalHistory.value.length > 100) {
-      terminalHistory.value.shift();
-    }
-  }
-  terminalHistoryIndex.value = terminalHistory.value.length;
-  terminalHistoryDraft.value = "";
-  terminalInput.value = "";
-  error.value = "";
-  isBusy.value = true;
-  activeWorkspace.value = "terminal";
-  terminalOutput.value += `${terminalOutput.value ? "\n\n" : ""}$ ${rawCommand}\n`;
-  await scrollTerminalToEnd();
-
-  try {
-    const response = await fetch(`${apiBase.value}/sessions/${sessionId.value}/terminal`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ command: rawCommand }),
-    });
-    const data = await parseResponse(response);
-    terminalOutput.value += data.output || "Команда выполнена без текстового вывода.";
-  } catch (err) {
-    const message = errorMessage(err);
-    error.value = message;
-    terminalOutput.value += `Ошибка: ${message}`;
-  } finally {
-    await scrollTerminalToEnd();
-    isBusy.value = false;
-    await focusTerminalInput();
-  }
-}
-
-async function focusTerminalInput() {
+async function focusPasswordInput() {
   await nextTick();
-  terminalInputField.value?.focus();
+  passwordInputField.value?.focus();
 }
 
-function handleTerminalKeydown(event: KeyboardEvent) {
-  if (event.key === "ArrowUp") {
-    event.preventDefault();
-    navigateTerminalHistory(-1);
-    return;
-  }
+function initializeTerminal() {
+  if (!terminalHost.value || xterm) return;
 
-  if (event.key === "ArrowDown") {
-    event.preventDefault();
-    navigateTerminalHistory(1);
-    return;
-  }
-
-  if (event.key === "Tab") {
-    event.preventDefault();
-    completeTerminalInput(event.shiftKey);
-    return;
-  }
-
-  if (event.key === "Escape" || (event.ctrlKey && event.key.toLowerCase() === "u")) {
-    event.preventDefault();
-    terminalInput.value = "";
-    terminalHistoryIndex.value = terminalHistory.value.length;
-    terminalHistoryDraft.value = "";
-    return;
-  }
-
-  if (event.ctrlKey && event.key.toLowerCase() === "l") {
-    event.preventDefault();
-    terminalOutput.value = connectedTo.value ? `Подключено к ${connectedTo.value}` : "";
-    return;
-  }
-
-  if (event.ctrlKey && event.key.toLowerCase() === "c") {
-    event.preventDefault();
-    if (isBusy.value) {
-      void interruptTerminalCommand();
-      return;
+  xterm = new XTerm({
+    cursorBlink: true,
+    cursorStyle: "block",
+    fontFamily: '"Cascadia Mono", "SFMono-Regular", Consolas, monospace',
+    fontSize: 14,
+    scrollback: 5000,
+    theme: {
+      background: "#030506",
+      foreground: "#d7e3e7",
+      cursor: "#7de4ef",
+      selectionBackground: "#17434a",
+      black: "#030506",
+      brightBlack: "#68767c",
+      cyan: "#55d4e3",
+      brightCyan: "#a9f4fb",
+      green: "#5be0a9",
+      red: "#ff7e78",
+      yellow: "#ffb866",
+    },
+  });
+  fitAddon = new FitAddon();
+  xterm.loadAddon(fitAddon);
+  xterm.open(terminalHost.value);
+  xterm.onData((data) => {
+    if (terminalSocket?.readyState === WebSocket.OPEN) {
+      terminalSocket.send(JSON.stringify({ type: "input", data }));
     }
-    if (terminalInput.value) {
-      terminalOutput.value += `${terminalOutput.value ? "\n\n" : ""}$ ${terminalInput.value}\n^C`;
-      terminalInput.value = "";
-      terminalHistoryIndex.value = terminalHistory.value.length;
-      terminalHistoryDraft.value = "";
-      void scrollTerminalToEnd();
+  });
+  xterm.onResize(({ cols, rows }) => {
+    if (terminalSocket?.readyState === WebSocket.OPEN) {
+      terminalSocket.send(JSON.stringify({ type: "resize", columns: cols, rows }));
     }
-  }
+  });
+  terminalResizeObserver = new ResizeObserver(() => fitTerminal());
+  terminalResizeObserver.observe(terminalHost.value);
 }
 
-async function interruptTerminalCommand() {
-  if (!sessionId.value) return;
-
+function fitTerminal() {
+  if (!fitAddon || activeWorkspace.value !== "terminal") return;
   try {
-    const response = await fetch(`${apiBase.value}/sessions/${sessionId.value}/terminal/interrupt`, {
-      method: "POST",
-    });
-    await parseResponse(response);
-  } catch (err) {
-    error.value = errorMessage(err);
+    fitAddon.fit();
+  } catch {
+    // The terminal can be temporarily hidden while Vue switches panes.
   }
 }
 
-function navigateTerminalHistory(direction: -1 | 1) {
-  if (!terminalHistory.value.length) return;
+function openTerminalSocket() {
+  if (!sessionId.value || activeWorkspace.value !== "terminal") return;
+  initializeTerminal();
+  if (terminalSocket && terminalSocket.readyState <= WebSocket.OPEN) return;
 
-  if (direction === -1) {
-    if (terminalHistoryIndex.value === terminalHistory.value.length) {
-      terminalHistoryDraft.value = terminalInput.value;
+  const websocketBase = apiBase.value.replace(/^http/, "ws");
+  const socket = new WebSocket(`${websocketBase}/sessions/${sessionId.value}/terminal/ws`);
+  terminalSocket = socket;
+  socket.addEventListener("open", () => {
+    fitTerminal();
+    socket.send(
+      JSON.stringify({
+        type: "resize",
+        columns: xterm?.cols || 120,
+        rows: xterm?.rows || 40,
+      }),
+    );
+    xterm?.focus();
+  });
+  socket.addEventListener("message", (event) => {
+    try {
+      const message = JSON.parse(String(event.data));
+      if (message.type === "output") {
+        xterm?.write(String(message.data || ""));
+      }
+    } catch {
+      xterm?.write(String(event.data));
     }
-    terminalHistoryIndex.value = Math.max(0, terminalHistoryIndex.value - 1);
-    terminalInput.value = terminalHistory.value[terminalHistoryIndex.value] || "";
-  } else {
-    terminalHistoryIndex.value = Math.min(terminalHistory.value.length, terminalHistoryIndex.value + 1);
-    terminalInput.value =
-      terminalHistoryIndex.value === terminalHistory.value.length
-        ? terminalHistoryDraft.value
-        : terminalHistory.value[terminalHistoryIndex.value] || "";
-  }
-
-  void moveTerminalCaretToEnd();
-}
-
-function completeTerminalInput(reverse: boolean) {
-  const query = terminalInput.value.trimStart().toLowerCase();
-  if (!query) return;
-
-  const candidates = [...new Set([...terminalHistory.value.slice().reverse(), ...IOS_COMPLETIONS])]
-    .filter((candidate) => candidate.toLowerCase().startsWith(query))
-    .sort((left, right) => left.length - right.length);
-  if (!candidates.length) return;
-
-  if (candidates.length === 1) {
-    terminalInput.value = candidates[0];
-    void moveTerminalCaretToEnd();
-    return;
-  }
-
-  if (reverse) {
-    terminalInput.value = candidates[candidates.length - 1] || terminalInput.value;
-    void moveTerminalCaretToEnd();
-    return;
-  }
-
-  const commonPrefix = findCommonPrefix(candidates);
-  if (commonPrefix.length > query.length) {
-    terminalInput.value = commonPrefix;
-    void moveTerminalCaretToEnd();
-    return;
-  }
-
-  terminalOutput.value += `${terminalOutput.value ? "\n\n" : ""}${candidates.slice(0, 12).join("    ")}`;
-  void scrollTerminalToEnd();
-}
-
-function findCommonPrefix(values: string[]) {
-  return values.reduce((prefix, value) => {
-    let index = 0;
-    const limit = Math.min(prefix.length, value.length);
-    while (index < limit && prefix[index].toLowerCase() === value[index].toLowerCase()) {
-      index += 1;
+  });
+  socket.addEventListener("close", () => {
+    if (terminalSocket === socket) {
+      terminalSocket = null;
     }
-    return prefix.slice(0, index);
+  });
+  socket.addEventListener("error", () => {
+    error.value = "Не удалось открыть WebSocket-терминал";
   });
 }
 
-async function moveTerminalCaretToEnd() {
-  await focusTerminalInput();
-  const input = terminalInputField.value;
-  if (input) {
-    input.setSelectionRange(input.value.length, input.value.length);
-  }
+async function closeTerminalSocket() {
+  const socket = terminalSocket;
+  if (!socket) return;
+  terminalSocket = null;
+  if (socket.readyState === WebSocket.CLOSED) return;
+
+  await new Promise<void>((resolve) => {
+    const timeout = window.setTimeout(resolve, 500);
+    socket.addEventListener(
+      "close",
+      () => {
+        window.clearTimeout(timeout);
+        resolve();
+      },
+      { once: true },
+    );
+    socket.close();
+  });
 }
 
-async function scrollTerminalToEnd() {
-  await nextTick();
-  if (terminalPane.value) {
-    terminalPane.value.scrollTop = terminalPane.value.scrollHeight;
+function terminalText() {
+  if (!xterm) return "";
+  const buffer = xterm.buffer.active;
+  const lines = [];
+  for (let index = 0; index < buffer.length; index += 1) {
+    lines.push(buffer.getLine(index)?.translateToString(true) || "");
   }
+  return lines.join("\n").trimEnd();
 }
 
 async function copyOutput() {
-  const text = activeWorkspace.value === "terminal" ? terminalOutput.value : output.value;
+  const text = activeWorkspace.value === "terminal" ? terminalText() : output.value;
   if (!text) return;
 
   await writeText(text);
@@ -731,7 +647,16 @@ function metricValue(metric: { label: string; value: string }) {
         </div>
         <label>
           Пароль
-          <input v-model="connection.password" type="password" autocomplete="current-password" required />
+          <input
+            ref="passwordInputField"
+            v-model="connection.password"
+            type="password"
+            autocomplete="current-password"
+          />
+        </label>
+        <label class="check">
+          <input v-model="rememberPassword" type="checkbox" />
+          Сохранять пароль в защищённом виде
         </label>
 
         <div class="actions">
@@ -858,7 +783,7 @@ function metricValue(metric: { label: string; value: string }) {
 
       <div v-if="error" class="notice error">{{ error }}</div>
 
-      <div v-if="activeWorkspace === 'commands'" class="terminal-wrap command-result">
+      <div v-show="activeWorkspace === 'commands'" class="terminal-wrap command-result">
         <button
           v-if="output"
           class="copy-output"
@@ -1013,9 +938,8 @@ function metricValue(metric: { label: string; value: string }) {
         <pre v-else class="terminal" :class="{ empty: !output }">{{ output || "После подключения выбери действие слева. Результат появится здесь." }}</pre>
       </div>
 
-      <div v-else class="terminal-wrap interactive-terminal">
+      <div v-show="activeWorkspace === 'terminal'" class="terminal-wrap interactive-terminal">
         <button
-          v-if="terminalOutput"
           class="copy-output"
           type="button"
           :title="copied ? 'Скопировано' : 'Копировать терминал'"
@@ -1024,19 +948,7 @@ function metricValue(metric: { label: string; value: string }) {
         >
           {{ copied ? "✓" : "⧉" }}
         </button>
-        <pre ref="terminalPane" class="terminal" :class="{ empty: !terminalOutput }">{{ terminalOutput || "Подключись к устройству и отправляй команды прямо отсюда." }}</pre>
-        <form class="terminal-input" @submit.prevent="runTerminalCommand">
-          <span>$</span>
-          <input
-            ref="terminalInputField"
-            v-model="terminalInput"
-            :disabled="!isConnected"
-            autocomplete="off"
-            placeholder="show interfaces status"
-            @keydown="handleTerminalKeydown"
-          />
-          <button type="submit" :disabled="isBusy || !isConnected || !terminalInput.trim()">Ввод</button>
-        </form>
+        <div ref="terminalHost" class="xterm-host"></div>
       </div>
     </section>
   </main>
