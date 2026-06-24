@@ -40,7 +40,7 @@ interface CommandOption {
 }
 
 interface Presentation {
-  kind: "interface_status" | "interface_summary" | "interface_detail" | "mac_table" | "ip_location";
+  kind: "interface_status" | "interface_summary" | "interface_detail" | "ip_interface_brief" | "mac_table" | "ip_location";
   rows?: Record<string, any>[];
   metrics?: { label: string; value: string }[];
   sources?: { label: string; command: string; status: "found" | "empty" | "unsupported"; lines: string[] }[];
@@ -99,6 +99,11 @@ const IOS_COMPLETIONS = [
   "interface",
   "interface range",
   "description",
+  "ip address",
+  "ip address dhcp",
+  "ip address negotiated",
+  "ip address secondary",
+  "no ip address",
   "switchport mode access",
   "switchport access vlan",
   "switchport mode trunk",
@@ -603,6 +608,25 @@ function statusLabel(value: string) {
   return labels[value.toLowerCase()] || value;
 }
 
+function ipInterfaceStatusLabel(value: string) {
+  const labels: Record<string, string> = {
+    up: "Включён",
+    down: "Нет соединения",
+    "administratively down": "Выключен администратором",
+  };
+  return labels[value.toLowerCase()] || value;
+}
+
+function ipMethodLabel(value: string) {
+  const labels: Record<string, string> = {
+    manual: "Статический",
+    nvram: "Из конфигурации",
+    dhcp: "DHCP",
+    unset: "Не задан",
+  };
+  return labels[value.toLowerCase()] || value;
+}
+
 function formatRate(bitsPerSecond: number) {
   if (!bitsPerSecond) return "0 бит/с";
   if (bitsPerSecond >= 1_000_000_000) return `${(bitsPerSecond / 1_000_000_000).toFixed(1)} Гбит/с`;
@@ -927,6 +951,31 @@ function metricValue(metric: { label: string; value: string }) {
                 <dd>{{ metricValue(metric) }}</dd>
               </div>
             </dl>
+          </div>
+
+          <div v-else-if="presentation.kind === 'ip_interface_brief'" class="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Состояние</th>
+                  <th>Интерфейс</th>
+                  <th>IP-адрес</th>
+                  <th>Источник</th>
+                  <th>Порт</th>
+                  <th>Протокол</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="row in presentation.rows" :key="row.interface">
+                  <td><span class="state-dot" :class="{ up: row.up }"></span>{{ row.up ? "UP" : "DOWN" }}</td>
+                  <td class="mono">{{ row.interface }}</td>
+                  <td class="mono">{{ row.ip_address === "unassigned" ? "Не назначен" : row.ip_address }}</td>
+                  <td>{{ ipMethodLabel(row.method) }}</td>
+                  <td>{{ ipInterfaceStatusLabel(row.status) }}</td>
+                  <td>{{ row.protocol.toLowerCase() === "up" ? "UP" : "DOWN" }}</td>
+                </tr>
+              </tbody>
+            </table>
           </div>
 
           <div v-else-if="presentation.kind === 'mac_table'" class="table-scroll">

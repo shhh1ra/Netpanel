@@ -89,7 +89,7 @@ class TerminalResponse(BaseModel):
 
 
 manager = SSHManager()
-app = FastAPI(title="Netpanel API", version="1.2.0")
+app = FastAPI(title="Netpanel API", version="1.2.1")
 
 app.add_middleware(
     CORSMiddleware,
@@ -321,6 +321,10 @@ def build_presentation(payload: CommandRequest, commands: list[str], results: li
         details = parse_interface_detail(results[0])
         return {"kind": "interface_detail", **details} if details else None
 
+    if payload.action == CommandAction.ip_interface_brief:
+        rows = parse_ip_interface_brief(results[0])
+        return {"kind": "ip_interface_brief", "rows": rows} if rows else None
+
     if payload.action in {CommandAction.mac_table, CommandAction.mac_on_interface}:
         rows = []
         for result in results:
@@ -447,6 +451,23 @@ def parse_interface_detail(output: str) -> dict[str, Any] | None:
                 details["metrics"].append({"label": label, "value": value})
 
     return details if details.get("interface") or details["metrics"] else None
+
+
+def parse_ip_interface_brief(output: str) -> list[dict[str, Any]]:
+    rows = []
+    pattern = re.compile(
+        r"^\s*(?P<interface>\S+)\s+(?P<ip_address>\S+)\s+(?P<ok>YES|NO|\?)\s+"
+        r"(?P<method>\S+)\s+(?P<status>.+?)\s+(?P<protocol>up|down)\s*$",
+        re.IGNORECASE,
+    )
+    for line in output.splitlines():
+        match = pattern.match(line)
+        if not match or match.group("interface").lower() == "interface":
+            continue
+        row = match.groupdict()
+        row["up"] = row["status"].lower() == "up" and row["protocol"].lower() == "up"
+        rows.append(row)
+    return rows
 
 
 def parse_mac_table(output: str) -> list[dict[str, str]]:
