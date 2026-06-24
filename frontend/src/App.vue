@@ -220,11 +220,16 @@ async function persistHostProfiles() {
   }
 }
 
-function selectHostProfile() {
+async function selectHostProfile() {
   const profile = hostProfiles.value.find((item) => item.id === selectedHostId.value);
   if (!profile) {
     hostProfileName.value = "";
     return;
+  }
+
+  const shouldReconnect = isConnected.value;
+  if (shouldReconnect) {
+    await disconnect();
   }
 
   hostProfileName.value = profile.name;
@@ -232,6 +237,10 @@ function selectHostProfile() {
   connection.port = profile.port;
   connection.username = profile.username;
   connection.password = profile.password;
+
+  if (shouldReconnect) {
+    await connect();
+  }
 }
 
 function saveHostProfile() {
@@ -661,7 +670,7 @@ function metricValue(metric: { label: string; value: string }) {
         <div class="host-manager">
           <label>
             Профиль
-            <select v-model="selectedHostId" @change="selectHostProfile">
+            <select v-model="selectedHostId" :disabled="isBusy" @change="selectHostProfile">
               <option value="">Новый хост</option>
               <option v-for="profile in hostProfiles" :key="profile.id" :value="profile.id">
                 {{ profile.name }} — {{ profile.host }}
