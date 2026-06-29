@@ -6,6 +6,7 @@ defineProps<{
   profiles: HostProfile[];
   isBusy: boolean;
   isConnected: boolean;
+  backendRestarting: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -14,6 +15,7 @@ const emit = defineEmits<{
   selectProfile: [];
   saveProfile: [];
   deleteProfile: [];
+  restartBackend: [];
   passwordElement: [element: HTMLInputElement | null];
 }>();
 
@@ -28,6 +30,10 @@ function exposePasswordField(element: Element | ComponentPublicInstance | null) 
   const input = element instanceof HTMLInputElement ? element : null;
   passwordField.value = input;
   emit("passwordElement", input);
+}
+
+function setAuthType(authType: "password" | "key") {
+  connection.value.authType = authType;
 }
 </script>
 
@@ -62,6 +68,30 @@ function exposePasswordField(element: Element | ComponentPublicInstance | null) 
       API backend
       <input v-model="apiBase" autocomplete="off" />
     </label>
+    <button class="backend-restart" type="button" :disabled="backendRestarting" @click="emit('restartBackend')">
+      {{ backendRestarting ? "Рестарт backend..." : "Рестарт backend" }}
+    </button>
+    <div class="auth-mode">
+      <span>Авторизация</span>
+      <div class="segmented">
+        <button
+          type="button"
+          :class="{ active: connection.authType === 'password' }"
+          :disabled="isBusy"
+          @click="setAuthType('password')"
+        >
+          Пароль
+        </button>
+        <button
+          type="button"
+          :class="{ active: connection.authType === 'key' }"
+          :disabled="isBusy"
+          @click="setAuthType('key')"
+        >
+          SSH-ключ
+        </button>
+      </div>
+    </div>
     <label>
       Хост
       <input v-model="connection.host" placeholder="192.168.1.10" autocomplete="off" required />
@@ -76,18 +106,28 @@ function exposePasswordField(element: Element | ComponentPublicInstance | null) 
         <input v-model="connection.username" autocomplete="username" required />
       </label>
     </div>
+    <label v-if="connection.authType === 'key'">
+      Путь к приватному ключу
+      <input
+        v-model="connection.keyPath"
+        placeholder="C:\Users\name\.ssh\id_rsa"
+        autocomplete="off"
+        required
+      />
+    </label>
     <label>
-      Пароль
+      {{ connection.authType === "key" ? "Passphrase ключа" : "Пароль" }}
       <input
         :ref="exposePasswordField"
         v-model="connection.password"
         type="password"
         autocomplete="current-password"
+        :required="connection.authType === 'password'"
       />
     </label>
     <label class="check">
       <input v-model="rememberPassword" type="checkbox" />
-      Сохранять пароль в защищённом виде
+      {{ connection.authType === "key" ? "Сохранять passphrase в защищённом виде" : "Сохранять пароль в защищённом виде" }}
     </label>
 
     <div class="actions">

@@ -16,7 +16,10 @@ export interface HostProfile {
   authType: "password" | "key"; keyPath?: string;
 }
 
-export interface ConnectionForm { host: string; port: number; username: string; password: string; }
+export interface ConnectionForm {
+  host: string; port: number; username: string; password: string;
+  authType: "password" | "key"; keyPath: string;
+}
 
 export interface CommandForm {
   action: Action; protocol: Protocol; discovery_protocol: DiscoveryProtocol;

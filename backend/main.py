@@ -22,7 +22,7 @@ from modules.ssh.manager import SSHManager
 
 
 manager = SSHManager()
-app = FastAPI(title="Netpanel API", version="1.5.0")
+app = FastAPI(title="Netpanel API", version="1.6.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -49,6 +49,8 @@ async def connect(payload: ConnectRequest):
             port=payload.port,
             username=payload.username,
             password=payload.password,
+            auth_type=payload.auth_type,
+            key_path=payload.key_path,
         )
     except Exception as exc:
         manager.remove_session(session_id)

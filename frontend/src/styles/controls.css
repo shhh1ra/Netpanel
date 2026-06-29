@@ -68,6 +68,21 @@ label {
   width: 100%;
 }
 
+.backend-restart {
+  width: 100%;
+  min-height: 38px;
+  border: 1px solid #273136;
+  background: #101719;
+  color: #9eeaf1;
+  font-size: 0.82rem;
+  font-weight: 750;
+}
+
+.backend-restart:hover {
+  border-color: #38b8c8;
+  background: #142226;
+}
+
 .segmented {
   display: grid;
   grid-auto-flow: column;
@@ -88,6 +103,14 @@ label {
   background: #172126;
   color: #55d4e3;
   box-shadow: none;
+}
+
+.auth-mode {
+  display: grid;
+  gap: 7px;
+  color: #8d9aa0;
+  font-size: 0.82rem;
+  font-weight: 650;
 }
 
 .check {

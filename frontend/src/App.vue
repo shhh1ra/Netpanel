@@ -11,6 +11,7 @@ import { useCommands } from "./composables/useCommands";
 import { useProfiles } from "./composables/useProfiles";
 import { useSession } from "./composables/useSession";
 import { useTerminal } from "./composables/useTerminal";
+import { useUpdateCheck } from "./composables/useUpdateCheck";
 import type { ConnectionForm, Workspace } from "./types/netpanel";
 
 const apiBase = ref("http://127.0.0.1:17761");
@@ -22,11 +23,19 @@ const error = ref("");
 const copied = ref(false);
 const passwordField = ref<HTMLInputElement | null>(null);
 const terminalPane = ref<{ host: HTMLElement | null } | null>(null);
-const connection = reactive<ConnectionForm>({ host: "", port: 22, username: "", password: "" });
+const connection = reactive<ConnectionForm>({
+  host: "",
+  port: 22,
+  username: "",
+  password: "",
+  authType: "password",
+  keyPath: "",
+});
 const isConnected = computed(() => Boolean(sessionId.value));
 
 const terminal = useTerminal({ apiBase, sessionId, workspace, error });
 const backend = useBackendSidecar();
+const updates = useUpdateCheck();
 
 async function focusPassword() {
   await nextTick();
@@ -79,9 +88,21 @@ async function copyOutput() {
   window.setTimeout(() => { copied.value = false; }, 1200);
 }
 
+async function restartBackend() {
+  error.value = "";
+  isBusy.value = true;
+  await terminal.close();
+  await backend.restart();
+  sessionId.value = "";
+  connectedTo.value = "";
+  isBusy.value = false;
+  if (backend.lastError.value) error.value = `Backend restart failed: ${backend.lastError.value}`;
+}
+
 onMounted(async () => {
   await profiles.load();
   void backend.start();
+  updates.startAutoCheck();
   await nextTick();
   if (terminalPane.value?.host) terminal.mount(terminalPane.value.host);
 });
@@ -98,6 +119,7 @@ watch(workspace, async (value) => {
 });
 
 onBeforeUnmount(() => {
+  updates.stopAutoCheck();
   terminal.dispose();
   void backend.stop();
 });
@@ -109,7 +131,7 @@ onBeforeUnmount(() => {
       <header class="brand">
         <div class="mark">2960</div>
         <div>
-          <h1>Netpanel</h1>
+          <h1>Netpanel <span>v{{ updates.currentVersion }}</span></h1>
           <p>SSH-панель для быстрых show-команд</p>
         </div>
       </header>
@@ -123,8 +145,10 @@ onBeforeUnmount(() => {
         :profiles="profiles.profiles.value"
         :is-busy="isBusy"
         :is-connected="isConnected"
+        :backend-restarting="backend.isRestarting.value"
         @connect="connect"
         @disconnect="session.disconnect"
+        @restart-backend="restartBackend"
         @select-profile="profiles.select"
         @save-profile="profiles.save"
         @delete-profile="profiles.remove"
@@ -145,6 +169,11 @@ onBeforeUnmount(() => {
         :connected-to="connectedTo"
         :commands="commands.issued.value"
       />
+      <div v-if="updates.hasUpdate.value" class="notice update">
+        <span>Доступна версия {{ updates.latestVersion.value }}. Сейчас установлена {{ updates.currentVersion }}.</span>
+        <button type="button" @click="updates.openRelease">Открыть релиз</button>
+        <button type="button" class="ghost" @click="updates.dismiss">Скрыть</button>
+      </div>
       <div v-if="error" class="notice error">{{ error }}</div>
       <ResultsPane
         v-show="workspace === 'commands'"

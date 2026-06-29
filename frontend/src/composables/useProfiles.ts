@@ -20,7 +20,7 @@ export function useProfiles(options: {
     return {
       id: profile.id || `${Date.now()}`, name: profile.name || profile.host || "Cisco",
       host: profile.host || "", port: profile.port || 22, username: profile.username || "",
-      password: profile.password || "", authType: profile.authType || "password", keyPath: profile.keyPath,
+      password: profile.password || "", authType: profile.authType || "password", keyPath: profile.keyPath || "",
     };
   }
 
@@ -52,11 +52,17 @@ export function useProfiles(options: {
     if (reconnect) await options.disconnect();
     profileName.value = profile.name;
     Object.assign(options.connection, {
-      host: profile.host, port: profile.port, username: profile.username, password: profile.password,
+      host: profile.host,
+      port: profile.port,
+      username: profile.username,
+      password: profile.password,
+      authType: profile.authType || "password",
+      keyPath: profile.keyPath || "",
     });
     rememberPassword.value = Boolean(profile.password);
-    if (reconnect && profile.password) await options.connect();
-    else if (!profile.password) await options.focusPassword();
+    const canReconnect = profile.authType === "key" ? Boolean(profile.keyPath) : Boolean(profile.password);
+    if (reconnect && canReconnect) await options.connect();
+    else if (profile.authType !== "key" && !profile.password) await options.focusPassword();
   }
 
   function save() {
@@ -67,7 +73,8 @@ export function useProfiles(options: {
       host: options.connection.host.trim(), port: options.connection.port,
       username: options.connection.username.trim(),
       password: rememberPassword.value ? options.connection.password : "",
-      authType: existing?.authType || "password", keyPath: existing?.keyPath,
+      authType: options.connection.authType,
+      keyPath: options.connection.keyPath.trim(),
     };
     if (existing) Object.assign(existing, profile);
     else { profiles.value.push(profile); selectedId.value = profile.id; }

@@ -103,6 +103,22 @@ th {
   color: #7de4ef;
 }
 
+.column-tools {
+  display: grid;
+  gap: 7px;
+  min-width: 112px;
+}
+
+.column-filter {
+  width: 100%;
+  min-height: 28px;
+  border-radius: 6px;
+  padding: 0 8px;
+  font-size: 0.72rem;
+  font-weight: 650;
+  text-transform: none;
+}
+
 tbody tr:hover {
   background: #081114;
 }

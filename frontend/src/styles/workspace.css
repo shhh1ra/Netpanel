@@ -66,6 +66,36 @@ code {
   color: #ff7e78;
 }
 
+.notice.update {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px solid #24424a;
+  background: #071418;
+  color: #b9eef4;
+}
+
+.notice.update span {
+  min-width: 0;
+}
+
+.notice.update button {
+  min-height: 32px;
+  border: 1px solid #2e5961;
+  background: #10272d;
+  color: #7de4ef;
+  font-size: 0.8rem;
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+.notice.update button.ghost {
+  border-color: #263137;
+  background: #101417;
+  color: #93a0a5;
+}
+
 .terminal-wrap {
   position: relative;
   grid-row: 3;

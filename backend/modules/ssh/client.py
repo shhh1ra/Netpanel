@@ -42,12 +42,31 @@ class SSHClient:
             login_timeout=12,
             connect_timeout=12,
         )
+        await self._open_shell(host, port, username)
+        return self.conn
+
+    async def connect_key(self, host: str, port: int, username: str, key_path: str, passphrase: str | None = None):
+        self.conn = await asyncssh.connect(
+            host,
+            port=port,
+            username=username,
+            client_keys=[key_path],
+            passphrase=passphrase or None,
+            known_hosts=None,
+            encryption_algs=ENCRYPTION_ALGS,
+            kex_algs=KEX_ALGS,
+            login_timeout=12,
+            connect_timeout=12,
+        )
+        await self._open_shell(host, port, username)
+        return self.conn
+
+    async def _open_shell(self, host: str, port: int, username: str):
         self.process = await self.conn.create_process(term_type="vt100", term_size=(120, 40))
         self.info = SSHConnectionInfo(host=host, port=port, username=username)
         await self._read_until_prompt()
         await self.run_command("terminal length 0")
         await self.run_command("terminal width 512")
-        return self.conn
 
     async def run_command(self, command: str, timeout: float = 30) -> str:
         if not self.conn or not self.process:

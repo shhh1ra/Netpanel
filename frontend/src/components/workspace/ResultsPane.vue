@@ -8,7 +8,13 @@ import {
 
 type SortDirection = "asc" | "desc";
 type SortValue = string | number | boolean | null | undefined;
-type SortColumn = { key: string; label: string; get: (row: Record<string, any>) => SortValue };
+type SortColumn = {
+  key: string;
+  label: string;
+  get: (row: Record<string, any>) => SortValue;
+  filter?: (row: Record<string, any>) => string;
+  filterMode?: "text" | "drops";
+};
 
 const props = defineProps<{ output: string; presentation: Presentation | null; copied: boolean }>();
 const emit = defineEmits<{ copy: [] }>();
@@ -16,6 +22,7 @@ const mode = defineModel<ResultMode>("mode", { required: true });
 
 const sortKey = ref("");
 const sortDirection = ref<SortDirection>("asc");
+const filters = ref<Record<string, string>>({});
 
 const collator = new Intl.Collator("ru", { numeric: true, sensitivity: "base" });
 
@@ -23,33 +30,33 @@ const columns = computed<SortColumn[]>(() => {
   if (!props.presentation) return [];
   if (props.presentation.kind === "interface_status") {
     return [
-      { key: "status", label: "Состояние", get: (row) => row.status },
+      { key: "status", label: "Состояние", get: (row) => row.status, filter: (row) => statusLabel(row.status) },
       { key: "port", label: "Интерфейс", get: (row) => row.port },
       { key: "name", label: "Имя", get: (row) => row.name },
       { key: "vlan", label: "VLAN", get: (row) => row.vlan },
-      { key: "duplex", label: "Duplex", get: (row) => row.duplex },
-      { key: "speed", label: "Скорость", get: (row) => speedSortValue(row.speed) },
+      { key: "duplex", label: "Duplex", get: (row) => row.duplex, filter: (row) => duplexLabel(row.duplex) },
+      { key: "speed", label: "Скорость", get: (row) => speedSortValue(row.speed), filter: (row) => speedLabel(row.speed) },
       { key: "type", label: "Тип", get: (row) => row.type },
     ];
   }
   if (props.presentation.kind === "interface_summary") {
     return [
-      { key: "up", label: "Состояние", get: (row) => row.up },
+      { key: "up", label: "Состояние", get: (row) => row.up, filter: (row) => (row.up ? "UP" : "DOWN") },
       { key: "interface", label: "Интерфейс", get: (row) => row.interface },
       { key: "rx_bps", label: "Приём", get: (row) => row.rx_bps },
       { key: "tx_bps", label: "Передача", get: (row) => row.tx_bps },
       { key: "rx_pps", label: "RX пак/с", get: (row) => row.rx_pps },
       { key: "tx_pps", label: "TX пак/с", get: (row) => row.tx_pps },
-      { key: "drops", label: "Потери", get: (row) => row.input_drops + row.output_drops },
+      { key: "drops", label: "Потери", get: (row) => row.input_drops + row.output_drops, filterMode: "drops" },
     ];
   }
   if (props.presentation.kind === "ip_interface_brief") {
     return [
-      { key: "up", label: "Состояние", get: (row) => row.up },
+      { key: "up", label: "Состояние", get: (row) => row.up, filter: (row) => (row.up ? "UP" : "DOWN") },
       { key: "interface", label: "Интерфейс", get: (row) => row.interface },
       { key: "ip_address", label: "IP-адрес", get: (row) => row.ip_address },
-      { key: "method", label: "Источник", get: (row) => row.method },
-      { key: "status", label: "Порт", get: (row) => row.status },
+      { key: "method", label: "Источник", get: (row) => row.method, filter: (row) => ipMethodLabel(row.method) },
+      { key: "status", label: "Порт", get: (row) => row.status, filter: (row) => ipInterfaceStatusLabel(row.status) },
       { key: "protocol", label: "Протокол", get: (row) => row.protocol },
     ];
   }
@@ -57,7 +64,7 @@ const columns = computed<SortColumn[]>(() => {
     return [
       { key: "vlan", label: "VLAN", get: (row) => vlanSortValue(row.vlan) },
       { key: "mac", label: "MAC-адрес", get: (row) => row.mac },
-      { key: "entry_type", label: "Тип", get: (row) => row.entry_type },
+      { key: "entry_type", label: "Тип", get: (row) => row.entry_type, filter: (row) => row.entry_type === "DYNAMIC" ? "Динамический" : row.entry_type },
       { key: "port", label: "Порт", get: (row) => row.port },
     ];
   }
@@ -68,7 +75,7 @@ const columns = computed<SortColumn[]>(() => {
       { key: "mac", label: "MAC-адрес", get: (row) => row.mac },
       { key: "vlan", label: "VLAN", get: (row) => vlanSortValue(row.vlan) },
       { key: "port", label: "Порт", get: (row) => row.port },
-      { key: "entry_type", label: "Тип", get: (row) => row.entry_type },
+      { key: "entry_type", label: "Тип", get: (row) => row.entry_type, filter: (row) => row.entry_type === "DYNAMIC" ? "Динамический" : row.entry_type },
     ];
   }
   if (props.presentation.kind === "reachability") {
@@ -95,14 +102,29 @@ const columns = computed<SortColumn[]>(() => {
   return [];
 });
 
-const sortedRows = computed(() => {
+const filteredRows = computed(() => {
   const rows = props.presentation?.kind === "system_monitoring"
     ? [...(props.presentation.environment ?? [])]
     : [...(props.presentation?.rows ?? [])];
+  const activeFilters = columns.value
+    .map((column) => ({ column, terms: filterTerms(filters.value[column.key] || "") }))
+    .filter((item) => item.terms.length);
+
+  if (!activeFilters.length) return rows;
+
+  return rows.filter((row) => activeFilters.every(({ column, terms }) => {
+    if (column.filterMode === "drops") return matchDropsFilter(column.get(row), terms);
+    const value = filterValue(column, row);
+    return terms.some((term) => value.includes(term));
+  }));
+});
+
+const sortedRows = computed(() => {
+  const rows = filteredRows.value;
   const column = columns.value.find((item) => item.key === sortKey.value);
   if (!column) return rows;
 
-  return rows.sort((left, right) => {
+  return [...rows].sort((left, right) => {
     const result = compareValues(column.get(left), column.get(right));
     return sortDirection.value === "asc" ? result : -result;
   });
@@ -111,6 +133,7 @@ const sortedRows = computed(() => {
 watch(() => props.presentation?.kind, () => {
   sortKey.value = "";
   sortDirection.value = "asc";
+  filters.value = {};
 });
 
 function sortBy(key: string) {
@@ -125,6 +148,66 @@ function sortBy(key: string) {
 function sortLabel(key: string) {
   if (sortKey.value !== key) return "";
   return sortDirection.value === "asc" ? "↑" : "↓";
+}
+
+function filterValue(column: SortColumn, row: Record<string, any>) {
+  const visible = column.filter ? column.filter(row) : "";
+  const raw = column.get(row);
+  return normalizeFilterText(`${visible} ${String(raw ?? "")} ${interfaceAliases(raw)}`);
+}
+
+function filterTerms(value: string) {
+  return value
+    .split(",")
+    .map((item) => normalizeFilterText(item))
+    .filter(Boolean);
+}
+
+function matchDropsFilter(value: SortValue, terms: string[]) {
+  const drops = Number(value);
+  if (!Number.isFinite(drops)) return false;
+  return terms.some((term) => {
+    if (term === "0") return drops === 0;
+    if (term === ">0") return drops > 0;
+    return String(drops).includes(term);
+  });
+}
+
+function normalizeFilterText(value: unknown) {
+  return String(value ?? "").trim().toLowerCase();
+}
+
+function interfaceAliases(value: unknown) {
+  const text = String(value ?? "");
+  const aliases = new Set<string>();
+  const compact = text.toLowerCase().replace(/[\s_-]/g, "");
+  const patterns: Array<[RegExp, string]> = [
+    [/fastethernet/i, "fa"],
+    [/gigabitethernet/i, "gi"],
+    [/tengigabitethernet/i, "te"],
+    [/ethernet/i, "eth"],
+    [/port-channel/i, "po"],
+    [/vlan/i, "vlan"],
+    [/loopback/i, "lo"],
+    [/serial/i, "se"],
+  ];
+
+  for (const [pattern, alias] of patterns) {
+    if (pattern.test(text)) aliases.add(alias);
+  }
+  aliases.add(compact);
+
+  const shortInterface = compact
+    .replace(/^fastethernet/, "fa")
+    .replace(/^gigabitethernet/, "gi")
+    .replace(/^tengigabitethernet/, "te")
+    .replace(/^ethernet/, "eth")
+    .replace(/^portchannel/, "po")
+    .replace(/^loopback/, "lo")
+    .replace(/^serial/, "se");
+  aliases.add(shortInterface);
+
+  return [...aliases].join(" ");
 }
 
 function compareValues(left: SortValue, right: SortValue) {
@@ -172,7 +255,15 @@ function vlanSortValue(value: string) {
         <table>
           <thead><tr>
             <th v-for="column in columns" :key="column.key">
-              <button type="button" class="sort-button" @click="sortBy(column.key)">{{ column.label }} <span>{{ sortLabel(column.key) }}</span></button>
+              <div class="column-tools">
+                <button type="button" class="sort-button" @click="sortBy(column.key)">{{ column.label }} <span>{{ sortLabel(column.key) }}</span></button>
+                <select v-if="column.filterMode === 'drops'" v-model="filters[column.key]" class="column-filter" @click.stop>
+                  <option value="">Все</option>
+                  <option value="0">0</option>
+                  <option value=">0">&gt;0</option>
+                </select>
+                <input v-else v-model="filters[column.key]" class="column-filter" type="search" placeholder="Фильтр" @click.stop />
+              </div>
             </th>
           </tr></thead>
           <tbody>
@@ -189,7 +280,15 @@ function vlanSortValue(value: string) {
         <table>
           <thead><tr>
             <th v-for="column in columns" :key="column.key">
-              <button type="button" class="sort-button" @click="sortBy(column.key)">{{ column.label }} <span>{{ sortLabel(column.key) }}</span></button>
+              <div class="column-tools">
+                <button type="button" class="sort-button" @click="sortBy(column.key)">{{ column.label }} <span>{{ sortLabel(column.key) }}</span></button>
+                <select v-if="column.filterMode === 'drops'" v-model="filters[column.key]" class="column-filter" @click.stop>
+                  <option value="">Все</option>
+                  <option value="0">0</option>
+                  <option value=">0">&gt;0</option>
+                </select>
+                <input v-else v-model="filters[column.key]" class="column-filter" type="search" placeholder="Фильтр" @click.stop />
+              </div>
             </th>
           </tr></thead>
           <tbody>
@@ -220,7 +319,15 @@ function vlanSortValue(value: string) {
         <table>
           <thead><tr>
             <th v-for="column in columns" :key="column.key">
-              <button type="button" class="sort-button" @click="sortBy(column.key)">{{ column.label }} <span>{{ sortLabel(column.key) }}</span></button>
+              <div class="column-tools">
+                <button type="button" class="sort-button" @click="sortBy(column.key)">{{ column.label }} <span>{{ sortLabel(column.key) }}</span></button>
+                <select v-if="column.filterMode === 'drops'" v-model="filters[column.key]" class="column-filter" @click.stop>
+                  <option value="">Все</option>
+                  <option value="0">0</option>
+                  <option value=">0">&gt;0</option>
+                </select>
+                <input v-else v-model="filters[column.key]" class="column-filter" type="search" placeholder="Фильтр" @click.stop />
+              </div>
             </th>
           </tr></thead>
           <tbody>
@@ -239,7 +346,15 @@ function vlanSortValue(value: string) {
         <table>
           <thead><tr>
             <th v-for="column in columns" :key="column.key">
-              <button type="button" class="sort-button" @click="sortBy(column.key)">{{ column.label }} <span>{{ sortLabel(column.key) }}</span></button>
+              <div class="column-tools">
+                <button type="button" class="sort-button" @click="sortBy(column.key)">{{ column.label }} <span>{{ sortLabel(column.key) }}</span></button>
+                <select v-if="column.filterMode === 'drops'" v-model="filters[column.key]" class="column-filter" @click.stop>
+                  <option value="">Все</option>
+                  <option value="0">0</option>
+                  <option value=">0">&gt;0</option>
+                </select>
+                <input v-else v-model="filters[column.key]" class="column-filter" type="search" placeholder="Фильтр" @click.stop />
+              </div>
             </th>
           </tr></thead>
           <tbody>
@@ -256,7 +371,15 @@ function vlanSortValue(value: string) {
           <table>
             <thead><tr>
               <th v-for="column in columns" :key="column.key">
-                <button type="button" class="sort-button" @click="sortBy(column.key)">{{ column.label }} <span>{{ sortLabel(column.key) }}</span></button>
+                <div class="column-tools">
+                  <button type="button" class="sort-button" @click="sortBy(column.key)">{{ column.label }} <span>{{ sortLabel(column.key) }}</span></button>
+                  <select v-if="column.filterMode === 'drops'" v-model="filters[column.key]" class="column-filter" @click.stop>
+                    <option value="">Все</option>
+                    <option value="0">0</option>
+                    <option value=">0">&gt;0</option>
+                  </select>
+                  <input v-else v-model="filters[column.key]" class="column-filter" type="search" placeholder="Фильтр" @click.stop />
+                </div>
               </th>
             </tr></thead>
             <tbody>
@@ -301,7 +424,15 @@ function vlanSortValue(value: string) {
           <table>
             <thead><tr>
               <th v-for="column in columns" :key="column.key">
-                <button type="button" class="sort-button" @click="sortBy(column.key)">{{ column.label }} <span>{{ sortLabel(column.key) }}</span></button>
+                <div class="column-tools">
+                  <button type="button" class="sort-button" @click="sortBy(column.key)">{{ column.label }} <span>{{ sortLabel(column.key) }}</span></button>
+                  <select v-if="column.filterMode === 'drops'" v-model="filters[column.key]" class="column-filter" @click.stop>
+                    <option value="">Все</option>
+                    <option value="0">0</option>
+                    <option value=">0">&gt;0</option>
+                  </select>
+                  <input v-else v-model="filters[column.key]" class="column-filter" type="search" placeholder="Фильтр" @click.stop />
+                </div>
               </th>
             </tr></thead>
             <tbody>
@@ -329,7 +460,15 @@ function vlanSortValue(value: string) {
           <table>
             <thead><tr>
               <th v-for="column in columns" :key="column.key">
-                <button type="button" class="sort-button" @click="sortBy(column.key)">{{ column.label }} <span>{{ sortLabel(column.key) }}</span></button>
+                <div class="column-tools">
+                  <button type="button" class="sort-button" @click="sortBy(column.key)">{{ column.label }} <span>{{ sortLabel(column.key) }}</span></button>
+                  <select v-if="column.filterMode === 'drops'" v-model="filters[column.key]" class="column-filter" @click.stop>
+                    <option value="">Все</option>
+                    <option value="0">0</option>
+                    <option value=">0">&gt;0</option>
+                  </select>
+                  <input v-else v-model="filters[column.key]" class="column-filter" type="search" placeholder="Фильтр" @click.stop />
+                </div>
               </th>
             </tr></thead>
             <tbody>
@@ -375,7 +514,15 @@ function vlanSortValue(value: string) {
           <table>
             <thead><tr>
               <th v-for="column in columns" :key="column.key">
-                <button type="button" class="sort-button" @click="sortBy(column.key)">{{ column.label }} <span>{{ sortLabel(column.key) }}</span></button>
+                <div class="column-tools">
+                  <button type="button" class="sort-button" @click="sortBy(column.key)">{{ column.label }} <span>{{ sortLabel(column.key) }}</span></button>
+                  <select v-if="column.filterMode === 'drops'" v-model="filters[column.key]" class="column-filter" @click.stop>
+                    <option value="">Все</option>
+                    <option value="0">0</option>
+                    <option value=">0">&gt;0</option>
+                  </select>
+                  <input v-else v-model="filters[column.key]" class="column-filter" type="search" placeholder="Фильтр" @click.stop />
+                </div>
               </th>
             </tr></thead>
             <tbody>

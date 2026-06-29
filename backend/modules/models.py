@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -50,7 +50,9 @@ class ConnectRequest(BaseModel):
     host: str = Field(min_length=1)
     port: int = Field(default=22, ge=1, le=65535)
     username: str = Field(min_length=1)
-    password: str = Field(min_length=1)
+    password: str = ""
+    auth_type: Literal["password", "key"] = "password"
+    key_path: str | None = None
 
 
 class ConnectResponse(BaseModel):

@@ -18,9 +18,13 @@ export function useSession(options: {
   const isConnected = computed(() => Boolean(options.sessionId.value));
 
   async function connect() {
-    if (!options.connection.password) {
+    if (options.connection.authType === "password" && !options.connection.password) {
       options.error.value = "Введите пароль для подключения";
       await options.focusPassword();
+      return;
+    }
+    if (options.connection.authType === "key" && !options.connection.keyPath.trim()) {
+      options.error.value = "Укажите путь к приватному SSH-ключу";
       return;
     }
     options.error.value = "";
@@ -29,7 +33,11 @@ export function useSession(options: {
     try {
       const response = await fetch(`${options.apiBase.value}/sessions`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(options.connection),
+        body: JSON.stringify({
+          ...options.connection,
+          auth_type: options.connection.authType,
+          key_path: options.connection.keyPath,
+        }),
       });
       const data = await parseResponse(response);
       options.sessionId.value = data.session_id;

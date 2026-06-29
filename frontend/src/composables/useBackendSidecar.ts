@@ -1,7 +1,10 @@
 import { Command, type Child } from "@tauri-apps/api/shell";
+import { ref } from "vue";
 
 export function useBackendSidecar() {
   let child: Child | null = null;
+  const isRestarting = ref(false);
+  const lastError = ref("");
 
   async function start() {
     if (child) return;
@@ -13,8 +16,10 @@ export function useBackendSidecar() {
         },
       });
       child = await command.spawn();
+      lastError.value = "";
     } catch (error) {
       console.warn("Bundled backend was not started", error);
+      lastError.value = error instanceof Error ? error.message : String(error);
     }
   }
 
@@ -29,5 +34,15 @@ export function useBackendSidecar() {
     }
   }
 
-  return { start, stop };
+  async function restart() {
+    isRestarting.value = true;
+    try {
+      await stop();
+      await start();
+    } finally {
+      isRestarting.value = false;
+    }
+  }
+
+  return { start, stop, restart, isRestarting, lastError };
 }

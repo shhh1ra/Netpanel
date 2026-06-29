@@ -5,9 +5,17 @@ class SSHSession:
         self.is_connected = False
         self.last_error = None
 
-    async def connect(self, *args, **kwargs):
+    async def connect(self, *args, auth_type: str = "password", key_path: str | None = None, **kwargs):
         try:
-            await self.client.connect_password(*args, **kwargs)
+            password = kwargs.pop("password", "")
+            if auth_type == "key":
+                if not key_path:
+                    raise ValueError("SSH key path is required")
+                await self.client.connect_key(*args, key_path=key_path, passphrase=password or None, **kwargs)
+            else:
+                if not password:
+                    raise ValueError("Password is required")
+                await self.client.connect_password(*args, password=password, **kwargs)
             self.is_connected = True
             self.last_error = None
         except Exception as exc:
