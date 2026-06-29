@@ -1,0 +1,39 @@
+@media (max-width: 860px) {
+  body {
+    overflow: auto;
+  }
+
+  .shell {
+    grid-template-columns: 1fr;
+    height: auto;
+    min-height: 100vh;
+    overflow: visible;
+  }
+
+  .side {
+    height: auto;
+    overflow: visible;
+    border-right: 0;
+    border-bottom: 1px solid #20272b;
+  }
+
+  .workspace {
+    height: auto;
+    min-height: 62vh;
+    overflow: visible;
+  }
+
+  .topbar {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .command-list {
+    grid-column: 1 / -1;
+    justify-self: start;
+  }
+
+  .terminal-wrap {
+    grid-row: auto;
+    min-height: 420px;
+  }
+}

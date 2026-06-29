@@ -1,0 +1,115 @@
+button,
+input,
+select {
+  font: inherit;
+}
+
+button {
+  min-height: 40px;
+  border: 0;
+  border-radius: 8px;
+  background: #20272b;
+  color: #dce5e8;
+  cursor: pointer;
+  padding: 0 14px;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+input,
+select {
+  width: 100%;
+  min-height: 40px;
+  border: 1px solid #30393e;
+  border-radius: 8px;
+  background: #030405;
+  color: #f5f7f8;
+  outline: none;
+  padding: 0 11px;
+}
+
+input:focus,
+select:focus {
+  border-color: #27b3c5;
+  box-shadow: 0 0 0 3px rgba(39, 179, 197, 0.17);
+}
+
+label {
+  display: grid;
+  gap: 7px;
+  color: #8d9aa0;
+  font-size: 0.82rem;
+  font-weight: 650;
+}
+
+.grid.two {
+  display: grid;
+  grid-template-columns: minmax(80px, 0.7fr) minmax(0, 1.3fr);
+  gap: 10px;
+}
+
+.actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.primary,
+.run {
+  background: #138aa0;
+  color: #fff;
+  font-weight: 750;
+}
+
+.run {
+  width: 100%;
+}
+
+.segmented {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  gap: 4px;
+  border-radius: 8px;
+  background: #050607;
+  padding: 4px;
+}
+
+.segmented button {
+  min-height: 34px;
+  background: transparent;
+  font-size: 0.84rem;
+}
+
+.segmented button.active {
+  background: #172126;
+  color: #55d4e3;
+  box-shadow: none;
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.check input {
+  width: 16px;
+  min-height: 16px;
+}
+
+.status {
+  border-radius: 999px;
+  background: #161b1e;
+  color: #76858b;
+  padding: 4px 8px;
+  text-transform: uppercase;
+}
+
+.status.online {
+  background: #082d24;
+  color: #5be0a9;
+}

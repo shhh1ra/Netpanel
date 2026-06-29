@@ -1,0 +1,100 @@
+.shell {
+  display: grid;
+  grid-template-columns: minmax(320px, 390px) minmax(0, 1fr);
+  height: 100vh;
+  min-height: 0;
+  overflow: hidden;
+  background: #000;
+}
+
+.side {
+  display: grid;
+  align-content: start;
+  gap: 14px;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  border-right: 1px solid #20272b;
+  background: #050607;
+  padding: 18px;
+  scrollbar-gutter: stable;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 52px;
+}
+
+.mark {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  border-radius: 8px;
+  background: #138aa0;
+  color: #fff;
+  font-weight: 800;
+}
+
+.brand p {
+  margin-top: 4px;
+  color: #8d9aa0;
+  font-size: 0.86rem;
+}
+
+.panel {
+  display: grid;
+  gap: 12px;
+  border: 1px solid #242b2f;
+  border-radius: 8px;
+  background: #0b0d0f;
+  padding: 14px;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.28);
+}
+
+.panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.panel-head span {
+  color: #8d9aa0;
+  font-size: 0.76rem;
+  text-align: right;
+}
+
+.host-manager {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(110px, 0.7fr);
+  gap: 10px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #242b2f;
+}
+
+.host-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-column: 1 / -1;
+  gap: 8px;
+}
+
+.host-actions button {
+  min-height: 34px;
+  font-size: 0.82rem;
+}
+
+.workspace {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  gap: 14px;
+  min-width: 0;
+  height: 100vh;
+  min-height: 0;
+  overflow: hidden;
+  background: #000;
+  padding: 18px;
+}

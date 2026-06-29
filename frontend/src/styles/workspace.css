@@ -1,0 +1,167 @@
+.topbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 14px;
+  min-height: 54px;
+}
+
+.topbar strong {
+  display: block;
+  margin-top: 4px;
+}
+
+.command-list {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  justify-self: end;
+  min-width: 0;
+  gap: 6px;
+}
+
+.workspace-tabs {
+  display: inline-grid;
+  grid-auto-flow: column;
+  justify-self: center;
+  gap: 4px;
+  border: 1px solid #273136;
+  border-radius: 8px;
+  background: #050607;
+  padding: 3px;
+}
+
+.workspace-tabs button {
+  min-height: 32px;
+  border-radius: 6px;
+  background: transparent;
+  color: #9cabb0;
+  font-size: 0.82rem;
+  font-weight: 750;
+}
+
+.workspace-tabs button.active {
+  background: #132126;
+  color: #7de4ef;
+}
+
+code {
+  border: 1px solid #273136;
+  border-radius: 8px;
+  background: #080a0b;
+  color: #a9eaf0;
+  padding: 6px 8px;
+  font-family: "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 0.78rem;
+}
+
+.notice {
+  border-radius: 8px;
+  padding: 11px 12px;
+}
+
+.notice.error {
+  border: 1px solid #5c2424;
+  background: #210b0b;
+  color: #ff7e78;
+}
+
+.terminal-wrap {
+  position: relative;
+  grid-row: 3;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.terminal {
+  overflow: auto;
+  min-height: 0;
+  margin: 0;
+  border: 1px solid #273136;
+  border-radius: 8px;
+  background: #030506;
+  color: #d7e3e7;
+  padding: 16px;
+  font-family: "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 0.84rem;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
+}
+
+.terminal.empty {
+  color: #68767c;
+}
+
+.terminal-wrap .terminal {
+  width: 100%;
+  height: 100%;
+  padding-right: 64px;
+}
+
+.copy-output {
+  position: absolute;
+  z-index: 2;
+  top: 12px;
+  right: 28px;
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  min-height: 38px;
+  padding: 0;
+  border: 1px solid #2c3a40;
+  background: #101719;
+  color: #7de4ef;
+  font-size: 1.25rem;
+  line-height: 1;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+}
+
+.copy-output:hover {
+  border-color: #38b8c8;
+  background: #142226;
+  color: #d7fbff;
+}
+
+.interactive-terminal {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+  border: 1px solid #273136;
+  border-radius: 8px;
+  background: #030506;
+  overflow: hidden;
+  padding: 12px;
+}
+
+.xterm-host {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  padding-right: 58px;
+  box-sizing: border-box;
+}
+
+.xterm-host .xterm {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.xterm-host .xterm-viewport {
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
+}
+
+.xterm-host .xterm-screen {
+  max-width: 100%;
+}
+
+.interactive-terminal .copy-output {
+  right: 24px;
+}
