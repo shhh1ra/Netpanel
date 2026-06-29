@@ -108,7 +108,7 @@ def parse_interface_summary(output: str) -> list[dict[str, Any]]:
 
 
 def parse_interface_detail(output: str) -> dict[str, Any] | None:
-    details: dict[str, Any] = {"metrics": []}
+    details: dict[str, Any] = {"metrics": [], "counters": [], "queues": []}
     first_line = next((line.strip() for line in output.splitlines() if line.strip()), "")
     state_match = re.match(r"^(\S+) is ([^,]+), line protocol is (.+)$", first_line)
     if state_match:
@@ -137,7 +137,103 @@ def parse_interface_detail(output: str) -> dict[str, Any] | None:
             if value is not None:
                 details["metrics"].append({"label": label, "value": value})
 
-    return details if details.get("interface") or details["metrics"] else None
+    duplex_match = re.search(r"\b(Full|Half)-duplex,\s+([^,\n]+)", output, re.IGNORECASE)
+    if duplex_match:
+        details["metrics"].append({"label": "Duplex", "value": duplex_match.group(1).title()})
+        details["metrics"].append({"label": "Скорость", "value": duplex_match.group(2).strip()})
+
+    arp_match = re.search(r"ARP type:\s*([^,]+),\s*ARP Timeout\s+([^\n]+)", output, re.IGNORECASE)
+    if arp_match:
+        details["metrics"].append({"label": "ARP", "value": arp_match.group(1).strip()})
+        details["metrics"].append({"label": "ARP timeout", "value": arp_match.group(2).strip()})
+
+    last_match = re.search(r"Last input ([^,]+), output ([^,]+), output hang ([^\n]+)", output, re.IGNORECASE)
+    if last_match:
+        details["metrics"].extend(
+            [
+                {"label": "Последний вход", "value": last_match.group(1).strip()},
+                {"label": "Последний выход", "value": last_match.group(2).strip()},
+                {"label": "Output hang", "value": last_match.group(3).strip()},
+            ]
+        )
+
+    queue_match = re.search(
+        r"Input queue:\s*(\d+)/(\d+)/(\d+)/(\d+)\s*\(size/max/drops/flushes\);\s*Total output drops:\s*(\d+)",
+        output,
+        re.IGNORECASE,
+    )
+    if queue_match:
+        labels = ["Input queue size", "Input queue max", "Input queue drops", "Input queue flushes", "Output drops"]
+        details["queues"].extend(counter_row(label, value) for label, value in zip(labels, queue_match.groups()))
+
+    output_queue_match = re.search(r"Output queue:\s*(\d+)/(\d+)\s*\(size/max\)", output, re.IGNORECASE)
+    if output_queue_match:
+        details["queues"].extend(
+            counter_row(label, value)
+            for label, value in zip(("Output queue size", "Output queue max"), output_queue_match.groups())
+        )
+
+    counter_patterns = [
+        (r"(\d+) packets input,\s*(\d+) bytes,\s*(\d+) no buffer", ("Пакетов вход", "Байт вход", "No buffer")),
+        (r"Received\s+(\d+) broadcasts\s+\((\d+) multicasts\)", ("Broadcast", "Multicast")),
+        (r"(\d+) runts,\s*(\d+) giants,\s*(\d+) throttles", ("Runts", "Giants", "Throttles")),
+        (r"(\d+) input errors,\s*(\d+) CRC,\s*(\d+) frame,\s*(\d+) overrun,\s*(\d+) ignored", ("Input errors", "CRC", "Frame", "Overrun", "Ignored")),
+        (r"(\d+) watchdog,\s*(\d+) multicast,\s*(\d+) pause input", ("Watchdog", "Multicast input", "Pause input")),
+        (r"(\d+) input packets with dribble condition detected", ("Dribble",)),
+        (r"(\d+) packets output,\s*(\d+) bytes,\s*(\d+) underruns", ("Пакетов выход", "Байт выход", "Underruns")),
+        (r"(\d+) output errors,\s*(\d+) collisions,\s*(\d+) interface resets", ("Output errors", "Collisions", "Interface resets")),
+        (r"(\d+) unknown protocol drops", ("Unknown protocol drops",)),
+        (r"(\d+) babbles,\s*(\d+) late collision,\s*(\d+) deferred", ("Babbles", "Late collisions", "Deferred")),
+        (r"(\d+) lost carrier,\s*(\d+) no carrier,\s*(\d+) pause output", ("Lost carrier", "No carrier", "Pause output")),
+        (r"(\d+) output buffer failures,\s*(\d+) output buffers swapped out", ("Output buffer failures", "Output buffers swapped")),
+    ]
+    for pattern, labels in counter_patterns:
+        match = re.search(pattern, output, re.IGNORECASE)
+        if not match:
+            continue
+        details["counters"].extend(counter_row(label, value) for label, value in zip(labels, match.groups()))
+
+    return details if details.get("interface") or details["metrics"] or details["counters"] else None
+
+
+def counter_row(label: str, value: str) -> dict[str, str]:
+    number = int(value)
+    lowered = label.lower()
+    warning_terms = (
+        "error",
+        "drop",
+        "collision",
+        "buffer",
+        "no buffer",
+        "ignored",
+        "overrun",
+        "underrun",
+        "reset",
+        "lost carrier",
+        "no carrier",
+        "babbles",
+        "deferred",
+        "watchdog",
+        "throttle",
+        "runts",
+        "giants",
+        "dribble",
+        "failure",
+        "flush",
+    )
+    is_problem_counter = any(term in lowered for term in warning_terms)
+    if number == 0:
+        status, status_class = "OK", "ok"
+    elif is_problem_counter:
+        status, status_class = "Есть", "warning"
+    else:
+        status, status_class = "Инфо", "info"
+    return {
+        "label": label,
+        "value": value,
+        "status": status,
+        "status_class": status_class,
+    }
 
 
 def parse_ip_interface_brief(output: str) -> list[dict[str, Any]]:

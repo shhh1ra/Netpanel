@@ -182,6 +182,7 @@ onBeforeUnmount(() => {
         :presentation="commands.presentation.value"
         :copied="copied"
         @copy="copyOutput"
+        @interface-detail="commands.runInterfaceDetail"
       />
       <TerminalPane
         v-show="workspace === 'terminal'"

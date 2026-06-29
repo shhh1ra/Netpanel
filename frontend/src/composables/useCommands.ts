@@ -59,5 +59,12 @@ export function useCommands(options: {
     }
   }
 
-  return { command, output, presentation, mode, issued, canRun, run };
+  async function runInterfaceDetail(interfaceName: string) {
+    command.action = "interface_diagnostics";
+    command.interface_view = "detail";
+    command.interface = interfaceName;
+    await run();
+  }
+
+  return { command, output, presentation, mode, issued, canRun, run, runInterfaceDetail };
 }

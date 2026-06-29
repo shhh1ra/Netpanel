@@ -32,6 +32,7 @@ export interface CommandForm {
 
 export interface CommandOption { value: Action; label: string; description: string; }
 export interface ResultMetric { label: string; value: string; }
+export interface ResultStatusRow { label: string; value: string; status: string; status_class: string; }
 export interface ResultSource {
   label: string; command: string; status: "found" | "empty" | "unsupported"; lines: string[];
 }
@@ -46,6 +47,8 @@ export interface Presentation {
   interface?: string;
   state?: string;
   protocol?: string;
+  counters?: ResultStatusRow[];
+  queues?: ResultStatusRow[];
   command?: string;
   mode?: string;
   status?: string;

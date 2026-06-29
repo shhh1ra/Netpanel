@@ -22,7 +22,7 @@ from modules.ssh.manager import SSHManager
 
 
 manager = SSHManager()
-app = FastAPI(title="Netpanel API", version="1.6.0")
+app = FastAPI(title="Netpanel API", version="1.6.1")
 
 app.add_middleware(
     CORSMiddleware,

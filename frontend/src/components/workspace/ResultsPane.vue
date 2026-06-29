@@ -17,12 +17,13 @@ type SortColumn = {
 };
 
 const props = defineProps<{ output: string; presentation: Presentation | null; copied: boolean }>();
-const emit = defineEmits<{ copy: [] }>();
+const emit = defineEmits<{ copy: []; interfaceDetail: [interfaceName: string] }>();
 const mode = defineModel<ResultMode>("mode", { required: true });
 
 const sortKey = ref("");
 const sortDirection = ref<SortDirection>("asc");
 const filters = ref<Record<string, string>>({});
+const contextMenu = ref({ visible: false, x: 0, y: 0, interfaceName: "" });
 
 const collator = new Intl.Collator("ru", { numeric: true, sensitivity: "base" });
 
@@ -134,6 +135,7 @@ watch(() => props.presentation?.kind, () => {
   sortKey.value = "";
   sortDirection.value = "asc";
   filters.value = {};
+  closeContextMenu();
 });
 
 function sortBy(key: string) {
@@ -148,6 +150,27 @@ function sortBy(key: string) {
 function sortLabel(key: string) {
   if (sortKey.value !== key) return "";
   return sortDirection.value === "asc" ? "↑" : "↓";
+}
+
+function openInterfaceMenu(event: MouseEvent, interfaceName: string) {
+  const host = (event.currentTarget as HTMLElement).closest(".command-result");
+  const rect = host?.getBoundingClientRect();
+  contextMenu.value = {
+    visible: true,
+    x: event.clientX - (rect?.left ?? 0),
+    y: event.clientY - (rect?.top ?? 0),
+    interfaceName,
+  };
+}
+
+function closeContextMenu() {
+  contextMenu.value.visible = false;
+}
+
+function runContextInterfaceDetail() {
+  if (!contextMenu.value.interfaceName) return;
+  emit("interfaceDetail", contextMenu.value.interfaceName);
+  closeContextMenu();
 }
 
 function filterValue(column: SortColumn, row: Record<string, any>) {
@@ -233,7 +256,7 @@ function vlanSortValue(value: string) {
 </script>
 
 <template>
-  <div class="terminal-wrap command-result">
+  <div class="terminal-wrap command-result" @click="closeContextMenu">
     <button
       v-if="output"
       class="copy-output"
@@ -242,6 +265,15 @@ function vlanSortValue(value: string) {
       :aria-label="copied ? 'Скопировано' : 'Копировать вывод'"
       @click="emit('copy')"
     >{{ copied ? "✓" : "⧉" }}</button>
+    <div
+      v-if="contextMenu.visible"
+      class="context-menu"
+      :style="{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }"
+      @click.stop
+      @contextmenu.prevent
+    >
+      <button type="button" @click="runContextInterfaceDetail">Детальная статистика</button>
+    </div>
 
     <div v-if="presentation" class="result-toolbar">
       <div class="result-tabs">
@@ -267,7 +299,7 @@ function vlanSortValue(value: string) {
             </th>
           </tr></thead>
           <tbody>
-            <tr v-for="row in sortedRows" :key="row.port">
+            <tr v-for="row in sortedRows" :key="row.port" @contextmenu.prevent="openInterfaceMenu($event, row.port)">
               <td><span class="state-dot" :class="{ up: row.up }"></span>{{ statusLabel(row.status) }}</td>
               <td class="mono">{{ row.port }}</td><td>{{ row.name || "—" }}</td><td>{{ row.vlan || "—" }}</td>
               <td>{{ duplexLabel(row.duplex) }}</td><td>{{ speedLabel(row.speed) }}</td><td>{{ row.type || "—" }}</td>
@@ -292,7 +324,7 @@ function vlanSortValue(value: string) {
             </th>
           </tr></thead>
           <tbody>
-            <tr v-for="row in sortedRows" :key="row.interface">
+            <tr v-for="row in sortedRows" :key="row.interface" @contextmenu.prevent="openInterfaceMenu($event, row.interface)">
               <td><span class="state-dot" :class="{ up: row.up }"></span>{{ row.up ? "UP" : "DOWN" }}</td>
               <td class="mono">{{ row.interface }}</td><td>{{ formatRate(row.rx_bps) }}</td><td>{{ formatRate(row.tx_bps) }}</td>
               <td>{{ row.rx_pps }}</td><td>{{ row.tx_pps }}</td>
@@ -313,6 +345,30 @@ function vlanSortValue(value: string) {
         <dl class="metric-grid">
           <div v-for="metric in presentation.metrics" :key="metric.label"><dt>{{ metric.label }}</dt><dd>{{ metricValue(metric) }}</dd></div>
         </dl>
+        <div v-if="presentation.queues?.length" class="table-scroll detail-table">
+          <table>
+            <thead><tr><th>Очередь</th><th>Значение</th><th>Статус</th></tr></thead>
+            <tbody>
+              <tr v-for="row in presentation.queues" :key="row.label">
+                <td>{{ row.label }}</td>
+                <td class="mono">{{ row.value }}</td>
+                <td><span class="status-pill" :class="row.status_class">{{ row.status }}</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div v-if="presentation.counters?.length" class="table-scroll detail-table">
+          <table>
+            <thead><tr><th>Счётчик</th><th>Значение</th><th>Статус</th></tr></thead>
+            <tbody>
+              <tr v-for="row in presentation.counters" :key="row.label">
+                <td>{{ row.label }}</td>
+                <td class="mono">{{ row.value }}</td>
+                <td><span class="status-pill" :class="row.status_class">{{ row.status }}</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </div>
 
       <div v-else-if="presentation.kind === 'ip_interface_brief'" class="table-scroll">
@@ -331,7 +387,7 @@ function vlanSortValue(value: string) {
             </th>
           </tr></thead>
           <tbody>
-            <tr v-for="row in sortedRows" :key="row.interface">
+            <tr v-for="row in sortedRows" :key="row.interface" @contextmenu.prevent="openInterfaceMenu($event, row.interface)">
               <td><span class="state-dot" :class="{ up: row.up }"></span>{{ row.up ? "UP" : "DOWN" }}</td>
               <td class="mono">{{ row.interface }}</td>
               <td class="mono">{{ row.ip_address === "unassigned" ? "Не назначен" : row.ip_address }}</td>

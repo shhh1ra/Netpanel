@@ -6,6 +6,33 @@
   background: #030506;
 }
 
+.context-menu {
+  position: absolute;
+  z-index: 5;
+  min-width: 190px;
+  border: 1px solid #273136;
+  border-radius: 8px;
+  background: #101416;
+  padding: 5px;
+  box-shadow: 0 16px 34px rgba(0, 0, 0, 0.45);
+}
+
+.context-menu button {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  justify-content: flex-start;
+  min-height: 34px;
+  background: transparent;
+  color: #dce5e8;
+  text-align: left;
+}
+
+.context-menu button:hover {
+  background: #172126;
+  color: #7de4ef;
+}
+
 .command-result > .terminal {
   border: 0;
   border-radius: 0;
@@ -121,6 +148,10 @@ th {
 
 tbody tr:hover {
   background: #081114;
+}
+
+.table-scroll tbody tr {
+  cursor: context-menu;
 }
 
 .state-dot {
@@ -248,6 +279,11 @@ tbody tr:hover {
   color: #f2f7f8;
   font-size: 1rem;
   font-weight: 750;
+}
+
+.detail-table {
+  margin-top: 16px;
+  min-width: 520px;
 }
 
 .source-list {
